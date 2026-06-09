@@ -1,0 +1,15 @@
+nla-train-env/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+data/
+checkpoints/
+results/
+*.log
+logs/
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints/
+wandb/

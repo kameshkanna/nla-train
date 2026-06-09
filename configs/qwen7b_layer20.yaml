@@ -1,0 +1,113 @@
+# NLA training config: Qwen2.5-7B-Instruct, layer 20 pilot.
+# All hyperparameters live here — scripts read this file, nothing is hardcoded.
+
+target_model: "Qwen/Qwen2.5-7B-Instruct"
+verbalizer_model: "Qwen/Qwen2.5-7B-Instruct"
+target_layer: 20
+d_model: 3584
+num_layers: 28  # total decoder layers in target model
+seed: 42
+
+# Reference checkpoint for validation (kitft layer-20 release)
+reference_av_checkpoint: "kitft/nla-qwen2.5-7b-L20-av"
+reference_ar_checkpoint: "kitft/nla-qwen2.5-7b-L20-ar"
+
+datagen:
+  corpus: "HuggingFaceFW/fineweb"
+  corpus_name: "sample-10BT"        # fineweb subset
+  n_docs: 100000
+  positions_per_doc: 10             # activation samples per document
+  min_token_position: 50            # skip first 50 tokens (insufficient left context)
+  max_seq_len: 512                  # truncate docs to this length
+  chunk_size: 512                   # documents per vLLM batch
+  av_sft_frac: 0.30                 # 30k docs → AV SFT
+  ar_sft_frac: 0.30                 # 30k docs → AR SFT
+  rl_frac: 0.40                     # 40k docs → RL
+  output_dir: "data/raw"
+  vllm_gpu_memory_utilization: 0.85
+
+injection:
+  cjk_range_start: 0x3200           # U+3200 Enclosed CJK Letters begin
+  cjk_range_end: 0x33FF             # U+33FF Enclosed CJK Letters end
+  cache_file: "data/injection_token_cache.yaml"
+
+labeling:
+  sglang_url: "http://localhost:30000"
+  batch_size: 32
+  max_new_tokens: 150
+  temperature: 0.7
+  output_dir: "data/labeled"
+
+ar_sft:
+  output_dir: "checkpoints/ar_sft"
+  lora_rank: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  per_device_train_batch_size: 32
+  gradient_accumulation_steps: 8    # effective batch = 256
+  learning_rate: 2.0e-5
+  lr_scheduler_type: "cosine"
+  lr_min_ratio: 0.1                 # final lr = lr * ratio = 2e-6
+  warmup_steps: 50
+  num_train_epochs: 1
+  bf16: true
+  gradient_checkpointing: false     # truncated model fits without it
+  dataloader_num_workers: 4
+  save_steps: 200
+  logging_steps: 10
+
+av_sft:
+  output_dir: "checkpoints/av_sft"
+  lora_rank: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 32   # effective batch = 256
+  learning_rate: 2.0e-5
+  lr_scheduler_type: "cosine"
+  lr_min_ratio: 0.1
+  warmup_steps: 50
+  num_train_epochs: 1
+  bf16: true
+  gradient_checkpointing: true      # full 28-layer model needs it
+  dataloader_num_workers: 4
+  save_steps: 200
+  logging_steps: 10
+  max_response_length: 150          # cap AV output tokens (matches RL stage)
+
+grpo:
+  output_dir: "checkpoints/grpo"
+  num_generations: 8                # samples per prompt
+  max_completion_length: 150
+  kl_coef: 0.01
+  learning_rate: 1.41e-5
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 32   # 128 prompts effective
+  num_train_epochs: 1
+  bf16: true
+  gradient_checkpointing: true
+  save_steps: 100
+  logging_steps: 5
+  ar_update_every_n_steps: 10       # re-train AR every N GRPO steps
+
+validation:
+  output_dir: "results/validation"
+  n_samples: 100
+  our_av_port: 30001
+  kitft_av_port: 30000
