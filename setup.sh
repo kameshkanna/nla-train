@@ -1,28 +1,47 @@
 #!/bin/bash
 set -euo pipefail
 
-python3.10 --version
+ENV_NAME="nla-train-env"
+PYTHON="python3.10"
 
-echo "==> nla-train-env"
-rm -rf nla-train-env
-python3.10 -m venv nla-train-env
-source nla-train-env/bin/activate
+$PYTHON --version
 
-pip install -q --upgrade pip
+echo "==> Creating virtual environment: $ENV_NAME"
+$PYTHON -m venv "$ENV_NAME"
+source "$ENV_NAME/bin/activate"
 
-pip install -q \
-    torch numpy scipy tqdm pyyaml rich \
-    "transformers>=4.45,<5" tokenizers accelerate safetensors \
-    "huggingface_hub>=0.24" "datasets>=2.20" \
-    "peft>=0.12" "trl>=0.11" \
-    "pyarrow>=16" pandas orjson httpx \
-    "sglang[all]==0.5.10"
+echo "==> Upgrading pip"
+pip install --upgrade pip --quiet
 
-# sglang pins transformers==5.3.0 — restore our version after
-pip install -q "transformers>=4.45,<5"
+echo "==> Installing core deps"
+pip install --quiet \
+    "torch>=2.3.0" \
+    "numpy>=1.26.0" \
+    "scipy>=1.13.0" \
+    "tqdm>=4.66.0" \
+    "pyyaml>=6.0" \
+    "rich>=13.7.0" \
+    "httpx>=0.27.0" \
+    "orjson>=3.9.0" \
+    "pandas>=2.2.0" \
+    "pyarrow>=16.0.0" \
+    "accelerate>=0.34.0" \
+    "safetensors>=0.4.0" \
+    "tokenizers>=0.20.0"
 
-pip install -q -e .
+echo "==> Installing PEFT + TRL"
+pip install --quiet "peft>=0.12.0" "trl>=0.11.0"
 
-deactivate
-echo "Done. source nla-train-env/bin/activate"
-echo "SGLang for stage 2: python3 -m sglang.launch_server (uses system python)"
+echo "==> Installing datasets + huggingface_hub"
+pip install --quiet "datasets>=2.20.0" "huggingface_hub>=0.24.0"
+
+echo "==> Installing SGLang 0.5.10 + transformers 5.3.0"
+pip install --quiet "sglang[all]==0.5.10"
+pip install --quiet "transformers==5.3.0" "huggingface_hub>=1.5.0"
+
+echo "==> Installing this package in editable mode"
+pip install --quiet -e .
+
+echo ""
+echo "Done. To activate:"
+echo "  source $ENV_NAME/bin/activate"
