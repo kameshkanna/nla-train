@@ -21,7 +21,7 @@ pip install -q \
     "peft>=0.12" "trl>=0.11" \
     "pyarrow>=16" pandas orjson httpx
 
-pip install -q --no-build-isolation -e .
+pip install -q --no-deps .  # non-editable, avoids setuptools backend issues
 deactivate
 
 # ── SGLang env ────────────────────────────────────────────────────────────────
