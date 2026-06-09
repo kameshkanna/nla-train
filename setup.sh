@@ -15,7 +15,11 @@ pip install -q \
     "transformers>=4.45,<5" tokenizers accelerate safetensors \
     "huggingface_hub>=0.24" "datasets>=2.20" \
     "peft>=0.12" "trl>=0.11" \
-    "pyarrow>=16" pandas orjson httpx
+    "pyarrow>=16" pandas orjson httpx \
+    "sglang[all]==0.5.10"
+
+# sglang pins transformers==5.3.0 — restore our version after
+pip install -q "transformers>=4.45,<5"
 
 pip install -q -e .
 
