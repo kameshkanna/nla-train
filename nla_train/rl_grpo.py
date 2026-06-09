@@ -326,7 +326,6 @@ def train_rl_grpo(
         cfg["verbalizer_model"],
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        attn_implementation="flash_attention_2",
         trust_remote_code=True,
     )
     av_model = PeftModel.from_pretrained(av_base, av_checkpoint, is_trainable=True)
@@ -337,7 +336,6 @@ def train_rl_grpo(
         cfg["target_model"],
         torch_dtype=torch.bfloat16,
         device_map="cpu",
-        attn_implementation="flash_attention_2",
         trust_remote_code=True,
     )
     ar_truncated = TruncatedARModel(

@@ -257,7 +257,6 @@ def train_ar_sft(
         cfg["target_model"],
         torch_dtype=torch.bfloat16,
         device_map="cpu",
-        attn_implementation="flash_attention_2",
         trust_remote_code=True,
     )
 
