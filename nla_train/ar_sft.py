@@ -255,8 +255,9 @@ def train_ar_sft(
     logger.info("Loading base model: %s", cfg["target_model"])
     base_model = AutoModelForCausalLM.from_pretrained(
         cfg["target_model"],
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
         device_map="cpu",
+        attn_implementation="flash_attention_2",
         trust_remote_code=True,
     )
 

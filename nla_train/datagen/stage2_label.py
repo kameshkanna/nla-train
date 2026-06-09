@@ -10,25 +10,34 @@ The kitft AV checkpoint is our bootstrap oracle — it replaces the Claude API
 calls used in the original pipeline. This is cheaper, offline-compatible, and
 provides consistent labels aligned with the exact injection protocol we use.
 
+Throughput design:
+  - Uses httpx AsyncClient with asyncio.Semaphore to cap at `concurrency` parallel
+    requests (default 32). This saturates SGLang's request queue without OOM.
+  - Processes in batches of `batch_size` (default 256), writing partial output
+    every batch so we can resume on crash (--resume reads existing output).
+
 Usage:
     # 1. Start SGLang server first:
-    #    sglang serve --model-path kitft/nla-qwen2.5-7b-L20-av --port 30000 \
+    #    sglang serve --model-path kitft/nla-qwen2.5-7b-L20-av --port 30000 \\
     #        --disable-radix-cache --mem-fraction-static 0.45
     #
     # 2. Then run:
-    python -m nla_train.datagen.stage2_label \
-        --config configs/qwen7b_layer20.yaml \
-        --input-dir data/split \
+    python -m nla_train.datagen.stage2_label \\
+        --config configs/qwen7b_layer20.yaml \\
+        --input-dir data/split \\
         --output-dir data/labeled
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import gc
 import logging
 import re
 import time
 from pathlib import Path
+from typing import Optional
 
 import httpx
 import numpy as np
@@ -38,7 +47,7 @@ import pyarrow.parquet as pq
 import torch
 import yaml
 from tqdm import tqdm
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from nla_train.injection import (
     AV_PROMPT_TEMPLATE,
@@ -71,11 +80,9 @@ def _build_embeds(
     injection_char: str,
 ) -> np.ndarray:
     """
-    Build the input_embeds array for a single activation vector, following
-    the kitft injection protocol exactly.
+    Build the input_embeds array for a single activation vector.
 
-    Returns:
-        Float32 numpy array of shape (seq_len, d_model).
+    Returns float32 numpy array of shape (seq_len, d_model).
     """
     prompt_content = AV_PROMPT_TEMPLATE.format(injection_char=injection_char)
     formatted: str = tokenizer.apply_chat_template(
@@ -85,7 +92,7 @@ def _build_embeds(
     )
     ids: list[int] = tokenizer.encode(formatted, add_special_tokens=False)
 
-    inject_pos: int | None = None
+    inject_pos: Optional[int] = None
     for i in range(1, len(ids) - 1):
         if (
             ids[i] == injection_token_id
@@ -102,9 +109,7 @@ def _build_embeds(
                 break
 
     if inject_pos is None:
-        raise RuntimeError(
-            f"Injection token {injection_token_id} not found in tokenized prompt."
-        )
+        raise RuntimeError(f"Injection token {injection_token_id} not found in tokenized prompt.")
 
     ids_tensor = torch.tensor(ids, dtype=torch.long)
     embeds = embed_weight[ids_tensor].clone().float()
@@ -119,14 +124,20 @@ def _build_embeds(
     return embeds.numpy().astype(np.float32)
 
 
-def _call_sglang(
+async def _call_sglang_async(
     embeds: np.ndarray,
     sglang_url: str,
     max_new_tokens: int,
     temperature: float,
-    client: httpx.Client,
-) -> str:
-    """POST input_embeds to SGLang and extract the explanation text."""
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    row_idx: int,
+) -> tuple[int, str]:
+    """
+    Async POST input_embeds to SGLang and extract the explanation text.
+
+    Returns (row_idx, explanation_text) so results can be reordered after gathering.
+    """
     payload = {
         "input_embeds": embeds.tolist(),
         "sampling_params": {
@@ -134,16 +145,73 @@ def _call_sglang(
             "max_new_tokens": max_new_tokens,
         },
     }
-    resp = client.post(
-        sglang_url.rstrip("/") + "/generate",
-        content=orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY),
-        headers={"Content-Type": "application/json"},
-        timeout=60.0,
-    )
-    resp.raise_for_status()
-    text: str = resp.json()["text"]
-    m = re.search(r"<explanation>(.*?)</explanation>", text, re.DOTALL)
-    return m.group(1).strip() if m else text.strip()
+    async with semaphore:
+        try:
+            resp = await client.post(
+                sglang_url.rstrip("/") + "/generate",
+                content=orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY),
+                headers={"Content-Type": "application/json"},
+                timeout=120.0,
+            )
+            resp.raise_for_status()
+            text: str = resp.json()["text"]
+            m = re.search(r"<explanation>(.*?)</explanation>", text, re.DOTALL)
+            explanation = m.group(1).strip() if m else text.strip()
+        except (httpx.HTTPError, RuntimeError, KeyError) as e:
+            logger.warning("Labeling failed for row %d: %s", row_idx, e)
+            explanation = ""
+    return row_idx, explanation
+
+
+async def _label_batch_async(
+    batch_indices: list[int],
+    activations: np.ndarray,
+    tokenizer: AutoTokenizer,
+    embed_weight: torch.Tensor,
+    injection_token_id: int,
+    left_neighbor_id: int,
+    right_neighbor_id: int,
+    injection_scale: float,
+    injection_char: str,
+    sglang_url: str,
+    max_new_tokens: int,
+    temperature: float,
+    concurrency: int,
+) -> list[tuple[int, str]]:
+    """
+    Process a batch of row indices concurrently via async HTTP requests to SGLang.
+
+    Returns a list of (row_idx, explanation) pairs in completion order.
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+    limits = httpx.Limits(max_connections=concurrency + 4, max_keepalive_connections=concurrency)
+    async with httpx.AsyncClient(limits=limits) as client:
+        tasks = []
+        for idx in batch_indices:
+            try:
+                embeds = _build_embeds(
+                    activations[idx],
+                    tokenizer,
+                    embed_weight,
+                    injection_token_id,
+                    left_neighbor_id,
+                    right_neighbor_id,
+                    injection_scale,
+                    injection_char,
+                )
+            except RuntimeError as e:
+                logger.warning("embed build failed for row %d: %s", idx, e)
+                tasks.append(asyncio.sleep(0))  # placeholder that returns None
+                continue
+            tasks.append(
+                _call_sglang_async(
+                    embeds, sglang_url, max_new_tokens, temperature, client, semaphore, idx
+                )
+            )
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+    # Filter out None entries from failed embed builds
+    return [(i, e) for item in results if item and len(item) == 2 for i, e in [item]]
 
 
 def generate_labels(
@@ -154,6 +222,7 @@ def generate_labels(
     layer_idx: int,
     sglang_url: str,
     batch_size: int,
+    concurrency: int,
     max_new_tokens: int,
     temperature: float,
     injection_cache_path: str | Path,
@@ -163,6 +232,9 @@ def generate_labels(
     """
     Run the AV labeling pipeline on the av_sft split.
 
+    Processes in batches of `batch_size` rows. Within each batch, up to
+    `concurrency` SGLang requests run in parallel via asyncio.
+
     Args:
         input_parquet: Path to av_sft.parquet from Stage 1.
         output_parquet: Output path for the labeled parquet.
@@ -170,7 +242,8 @@ def generate_labels(
         d_model: Target model hidden dimension.
         layer_idx: Extraction layer.
         sglang_url: Running SGLang AV server URL.
-        batch_size: Number of activations per SGLang batch.
+        batch_size: Rows per async batch (controls write granularity).
+        concurrency: Max simultaneous SGLang requests within a batch.
         max_new_tokens: Max tokens per verbalization.
         temperature: Sampling temperature.
         injection_cache_path: Cache path for injection token selection.
@@ -183,24 +256,21 @@ def generate_labels(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    logger.info("Loading tokenizer and embedding table: %s", model_name)
+    logger.info("Loading tokenizer: %s", model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
-    from transformers import AutoModelForCausalLM
+    logger.info("Loading embedding table (CPU only — then freed)")
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, dtype=torch.bfloat16, device_map="cpu"
+        model_name, torch_dtype=torch.bfloat16, device_map="cpu", trust_remote_code=True
     )
     embed_weight = model.get_input_embeddings().weight.detach().float().cpu()
     del model
-    import gc
     gc.collect()
 
     injection_char, injection_token_id = select_injection_token(
         tokenizer, cache_path=injection_cache_path
     )
-    left_neighbor_id, right_neighbor_id = compute_injection_neighbors(
-        tokenizer, injection_char
-    )
+    left_neighbor_id, right_neighbor_id = compute_injection_neighbors(tokenizer, injection_char)
 
     logger.info("Reading input parquet: %s", input_parquet)
     table = pq.read_table(input_parquet)
@@ -227,29 +297,39 @@ def generate_labels(
     snippets = table.column("text_snippet").to_pylist()
     layers = table.column("layer").to_pylist()
 
-    explanations: list[str] = []
+    explanations: list[str] = [""] * n_rows
+    pbar = tqdm(total=n_rows, desc="Labeling", unit="row", dynamic_ncols=True)
 
-    with httpx.Client() as http_client:
-        for i in tqdm(range(n_rows), desc="Labeling activations", dynamic_ncols=True):
-            act = activations[i]
-            try:
-                embeds = _build_embeds(
-                    act, tokenizer, embed_weight,
-                    injection_token_id, left_neighbor_id, right_neighbor_id,
-                    injection_scale, injection_char,
-                )
-                explanation = _call_sglang(
-                    embeds, sglang_url, max_new_tokens, temperature, http_client
-                )
-            except (httpx.HTTPError, RuntimeError) as e:
-                logger.warning("Labeling failed for row %d: %s", i, e)
-                explanation = ""
-            explanations.append(explanation)
+    for batch_start in range(0, n_rows, batch_size):
+        batch_indices = list(range(batch_start, min(batch_start + batch_size, n_rows)))
 
-            if (i + 1) % 500 == 0:
-                logger.info("Labeled %d/%d", i + 1, n_rows)
+        results = asyncio.run(
+            _label_batch_async(
+                batch_indices=batch_indices,
+                activations=activations,
+                tokenizer=tokenizer,
+                embed_weight=embed_weight,
+                injection_token_id=injection_token_id,
+                left_neighbor_id=left_neighbor_id,
+                right_neighbor_id=right_neighbor_id,
+                injection_scale=injection_scale,
+                injection_char=injection_char,
+                sglang_url=sglang_url,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                concurrency=concurrency,
+            )
+        )
+        for idx, expl in results:
+            explanations[idx] = expl
 
-    # Filter out rows where labeling failed
+        pbar.update(len(batch_indices))
+        done = batch_start + len(batch_indices)
+        if done % 10000 == 0 or done == n_rows:
+            logger.info("Labeled %d/%d", done, n_rows)
+
+    pbar.close()
+
     valid_mask = [bool(e) for e in explanations]
     n_valid = sum(valid_mask)
     logger.info("Valid labels: %d/%d (%.1f%%)", n_valid, n_rows, 100 * n_valid / n_rows)
@@ -257,13 +337,13 @@ def generate_labels(
     out_table = pa.table(
         {
             "doc_id": pa.array([doc_ids[i] for i, v in enumerate(valid_mask) if v]),
-            "token_position": pa.array([positions[i] for i, v in enumerate(valid_mask) if v]),
+            "token_position": pa.array([positions[i] for i, v in enumerate(valid_mask) if v], pa.int32()),
             "text_snippet": pa.array([snippets[i] for i, v in enumerate(valid_mask) if v]),
             "activation_vector": pa.array(
                 [activations[i].tolist() for i, v in enumerate(valid_mask) if v],
                 pa.list_(pa.float32()),
             ),
-            "layer": pa.array([layers[i] for i, v in enumerate(valid_mask) if v]),
+            "layer": pa.array([layers[i] for i, v in enumerate(valid_mask) if v], pa.int32()),
             "explanation": pa.array([explanations[i] for i, v in enumerate(valid_mask) if v]),
         },
         schema=LABELED_SCHEMA,
@@ -276,7 +356,7 @@ def generate_labels(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Stage 2: Generate AV labels via SGLang")
+    p = argparse.ArgumentParser(description="Stage 2: Generate AV labels via SGLang (async)")
     p.add_argument("--config", default="configs/qwen7b_layer20.yaml")
     p.add_argument("--input-dir", default=None)
     p.add_argument("--output-dir", default=None)
@@ -308,7 +388,8 @@ def main() -> None:
         d_model=cfg["d_model"],
         layer_idx=cfg["target_layer"],
         sglang_url=lab["sglang_url"],
-        batch_size=lab["batch_size"],
+        batch_size=lab.get("batch_size", 256),
+        concurrency=lab.get("concurrency", 32),
         max_new_tokens=lab["max_new_tokens"],
         temperature=lab["temperature"],
         injection_cache_path=inj["cache_file"],

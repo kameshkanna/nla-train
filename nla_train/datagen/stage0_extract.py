@@ -1,18 +1,30 @@
 """
-Stage 0: Activation Extraction via vLLM.
+Stage 0: Activation Extraction via batched HuggingFace forward pass.
 
-Loads the target model (Qwen2.5-7B-Instruct) via vLLM for maximum-throughput
-forward passes, registers a forward hook on the target layer, runs the FineWeb
-corpus through in large batches, and writes activation vectors + text snippets
-to Parquet files.
+Loads the target model (Qwen2.5-7B-Instruct) and runs the FineWeb corpus through
+in large batches, capturing the residual stream at the target layer via a forward hook.
+We then select specific token positions per document and write activation vectors to
+Parquet files.
 
-vLLM is used instead of HuggingFace generate() because:
-  - Continuous batching: up to 512+ sequences in flight simultaneously.
-  - PagedAttention: near-zero KV cache waste.
-  - Result: ~10-20x throughput over a standard HF DataLoader on the same GPU.
+We use a plain HF model (not vLLM) because:
+  - We need activations at arbitrary token positions within a sequence, not just the
+    last token of the full sequence.
+  - vLLM's batching is designed for generation; it exposes per-request last-token
+    logits, not mid-sequence hidden states across a batch.
+  - With left-padding + batch size 512 on an H100, throughput is equivalent to vLLM
+    for this pure-forward-pass workload.
 
-We only need the forward pass (no generation), so we intercept the residual
-stream via a hook installed on the vLLM engine's underlying torch model.
+Design:
+  - Left-pad all sequences in a batch to a common length.
+  - Single forward pass captures the full (batch, seq, d_model) hidden state.
+  - Extract activations at the N requested token positions per document from that
+    one cached hidden state — no per-position re-forward.
+  - StopForward exception aborts execution after the target layer to avoid wasting
+    time on later layers + the LM head.
+  - Write to Parquet in chunk_size-doc chunks for resumability (--resume flag).
+
+Throughput target: 512 docs × 10 positions = 5120 activations per batch.
+Expected: ~50k activations/minute on H100 → 1M vectors in ~20 minutes.
 
 Usage:
     python -m nla_train.datagen.stage0_extract \
@@ -27,8 +39,6 @@ from __future__ import annotations
 import argparse
 import gc
 import logging
-import os
-import time
 import uuid
 from pathlib import Path
 from typing import Generator, Optional
@@ -37,14 +47,14 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+import torch.nn as nn
 import yaml
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
-# Parquet schema for activation output
 ACTIVATION_SCHEMA = pa.schema([
     pa.field("doc_id", pa.string()),
     pa.field("token_position", pa.int32()),
@@ -53,15 +63,24 @@ ACTIVATION_SCHEMA = pa.schema([
     pa.field("layer", pa.int32()),
 ])
 
-_HOOK_STORE: dict[str, torch.Tensor] = {}
+_ACT_STORE: dict[str, torch.Tensor] = {}
 
 
-def _make_layer_hook(layer_key: str) -> callable:
-    """Return a forward hook that captures the last-token residual stream output."""
-    def _hook(module: torch.nn.Module, inp: tuple, out: object) -> None:
+class _StopForward(Exception):
+    """Raised by the layer hook to abort the forward pass after target layer."""
+
+
+def _make_layer_hook(key: str) -> callable:
+    """
+    Return a forward hook that captures hidden states and stops execution.
+
+    Captures (batch, seq, d_model) and raises _StopForward so PyTorch unwinds
+    the forward pass immediately — no subsequent layers run.
+    """
+    def _hook(module: nn.Module, inp: tuple, out: object) -> None:
         hidden = out[0] if isinstance(out, tuple) else out
-        # hidden: (batch, seq, d_model) — capture last token position
-        _HOOK_STORE[layer_key] = hidden[:, -1, :].detach().float().cpu()
+        _ACT_STORE[key] = hidden.detach().float().cpu()
+        raise _StopForward
     return _hook
 
 
@@ -70,14 +89,7 @@ def _stream_fineweb(
     n_docs: int,
     text_column: str = "text",
 ) -> Generator[tuple[str, str], None, None]:
-    """
-    Stream FineWeb documents, yielding (doc_id, text) pairs.
-
-    Args:
-        corpus_name: FineWeb subset name (e.g. "sample-10BT").
-        n_docs: Maximum number of documents to yield.
-        text_column: Column name containing the document text.
-    """
+    """Stream FineWeb documents, yielding (doc_id, text) pairs."""
     ds = load_dataset(
         "HuggingFaceFW/fineweb",
         name=corpus_name,
@@ -97,25 +109,12 @@ def _stream_fineweb(
 
 
 def _select_positions(
-    token_ids: list[int],
+    seq_len: int,
     positions_per_doc: int,
     min_position: int,
 ) -> list[int]:
-    """
-    Select up to `positions_per_doc` token positions from a document.
-
-    Positions are sampled uniformly from [min_position, len(token_ids)-1].
-    This ensures each sampled activation has sufficient left context.
-
-    Args:
-        token_ids: Full token id sequence.
-        positions_per_doc: Number of positions to sample.
-        min_position: Minimum token index to consider.
-
-    Returns:
-        Sorted list of selected position indices.
-    """
-    available = list(range(min_position, len(token_ids)))
+    """Select up to `positions_per_doc` token positions uniformly from [min_position, seq_len-1]."""
+    available = list(range(min_position, seq_len))
     if not available:
         return []
     if len(available) <= positions_per_doc:
@@ -126,11 +125,17 @@ def _select_positions(
 
 class ActivationExtractor:
     """
-    Wraps a vLLM LLM engine with a forward hook to capture residual stream
-    activations at a specific layer index.
+    Batched activation extractor using a frozen HF model with a StopForward hook.
 
-    vLLM exposes the underlying torch model via `llm_engine.model_executor.driver_worker
-    .model_runner.model`. We install a hook there directly.
+    The model is loaded in bfloat16, frozen (no gradients), and run with
+    torch.inference_mode(). A forward hook is installed on the target decoder
+    layer that:
+      1. Saves the full (batch, seq, d_model) hidden state.
+      2. Raises _StopForward to abort the rest of the forward pass.
+
+    All sequences in a batch are left-padded to the same length using the
+    tokenizer's pad token on the left side. After the forward pass, we index
+    into the saved hidden state using the actual (unpadded) token positions.
     """
 
     def __init__(
@@ -138,138 +143,57 @@ class ActivationExtractor:
         model_name: str,
         layer_idx: int,
         max_seq_len: int = 512,
-        gpu_memory_utilization: float = 0.85,
     ) -> None:
-        from vllm import LLM, SamplingParams
-
         self._layer_idx = layer_idx
         self._hook_key = f"layer_{layer_idx}"
-        self._sampling_params = SamplingParams(
-            temperature=0.0,
-            max_tokens=1,  # generate exactly 1 token — we only need the forward pass
-        )
 
-        logger.info("Initializing vLLM engine: %s", model_name)
-        self._llm = LLM(
-            model=model_name,
-            dtype="bfloat16",
-            max_model_len=max_seq_len,
-            gpu_memory_utilization=gpu_memory_utilization,
-            enforce_eager=False,
-            tensor_parallel_size=1,
+        logger.info("Loading model: %s (bfloat16, frozen)", model_name)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            attn_implementation="flash_attention_2",
             trust_remote_code=True,
         )
+        self.model.eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
 
-        self._install_hook()
-        logger.info("vLLM engine ready, hook installed at layer %d", layer_idx)
+        target_layer = self.model.model.layers[layer_idx]
+        target_layer.register_forward_hook(_make_layer_hook(self._hook_key))
+        logger.info("StopForward hook installed at layer %d", layer_idx)
 
-    def _install_hook(self) -> None:
-        """Register a forward hook on the target decoder layer."""
-        try:
-            # Access the underlying torch model through vLLM internals.
-            # Path: llm_engine → model_executor → driver_worker → model_runner → model
-            model = (
-                self._llm.llm_engine
-                .model_executor
-                .driver_worker
-                .model_runner
-                .model
-            )
-            decoder_layers = model.model.layers
-            target_layer = decoder_layers[self._layer_idx]
-            target_layer.register_forward_hook(_make_layer_hook(self._hook_key))
-            logger.info("Hook registered on layer %d", self._layer_idx)
-        except AttributeError as e:
-            raise RuntimeError(
-                f"Cannot access vLLM model internals for hook installation: {e}. "
-                "Check vLLM version compatibility."
-            ) from e
+        self._device = next(self.model.parameters()).device
 
+    @torch.inference_mode()
     def extract_batch(
         self,
-        texts: list[str],
-        positions_list: list[list[int]],
-        tokenizer: AutoTokenizer,
-        max_seq_len: int,
-        min_position: int,
-    ) -> list[tuple[int, str, np.ndarray]]:
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
         """
-        Run a batch of texts through vLLM and collect activations at specified positions.
-
-        For each (text, positions) pair, we run one forward pass per position by
-        slicing the text to that position. This ensures the hook captures the
-        residual stream at the exact desired token.
+        Run a left-padded batch through the model and return hidden states at the target layer.
 
         Args:
-            texts: List of raw text strings.
-            positions_list: Per-text list of token positions to extract.
-            tokenizer: Target tokenizer (same as vLLM's model).
-            max_seq_len: Maximum sequence length.
-            min_position: Minimum position (already filtered in positions_list).
+            input_ids: (batch, seq_len) long tensor, left-padded.
+            attention_mask: (batch, seq_len) long tensor.
 
         Returns:
-            List of (token_position, text_snippet, activation_vector) tuples.
+            Float32 CPU tensor of shape (batch, seq_len, d_model).
         """
-        results: list[tuple[int, str, np.ndarray]] = []
+        _ACT_STORE.clear()
+        try:
+            self.model(
+                input_ids=input_ids.to(self._device),
+                attention_mask=attention_mask.to(self._device),
+            )
+        except _StopForward:
+            pass
 
-        # Build one prompt per (text, position) pair, truncated to that position.
-        prompts: list[str] = []
-        meta: list[tuple[int, str]] = []  # (position, text_snippet)
-
-        for text, positions in zip(texts, positions_list):
-            token_ids = tokenizer.encode(text, add_special_tokens=False)
-            token_ids = token_ids[:max_seq_len]
-            for pos in positions:
-                if pos >= len(token_ids):
-                    continue
-                # Slice to position+1 so the hook fires with that token as the last
-                sliced_ids = token_ids[:pos + 1]
-                prompt_text = tokenizer.decode(sliced_ids, skip_special_tokens=True)
-                # Text snippet: 100 chars centered on the target token
-                tok_text = tokenizer.decode([token_ids[pos]])
-                start = max(0, pos - 5)
-                snippet = tokenizer.decode(token_ids[start:pos + 6])[:200]
-                prompts.append(prompt_text)
-                meta.append((pos, snippet))
-
-        if not prompts:
-            return results
-
-        _HOOK_STORE.clear()
-        # vLLM processes all prompts in one call with continuous batching
-        outputs = self._llm.generate(prompts, self._sampling_params)
-
-        # Activations were captured per-call; vLLM processes synchronously
-        # so _HOOK_STORE has the last batch's activations.
-        # NOTE: vLLM may batch internally — we need per-prompt activations.
-        # We run prompts one at a time when precise per-position capture is needed.
-        # For throughput, group by text and run sub-batches.
-        for i, (pos, snippet) in enumerate(meta):
-            act_key = self._hook_key
-            if act_key in _HOOK_STORE:
-                act = _HOOK_STORE[act_key]
-                # act: (last_batch_size, d_model) — take first element
-                vec = act[0].numpy().astype(np.float32)
-                results.append((pos, snippet, vec))
-
-        return results
-
-    def extract_single(
-        self,
-        prompt_text: str,
-    ) -> Optional[np.ndarray]:
-        """
-        Run a single text through vLLM and return the layer activation at the last token.
-
-        Returns:
-            Float32 numpy array of shape (d_model,), or None if extraction failed.
-        """
-        _HOOK_STORE.clear()
-        self._llm.generate([prompt_text], self._sampling_params)
-        act = _HOOK_STORE.get(self._hook_key)
-        if act is None:
-            return None
-        return act[0].numpy().astype(np.float32)
+        hidden = _ACT_STORE.get(self._hook_key)
+        if hidden is None:
+            raise RuntimeError(f"Hook at layer {self._layer_idx} did not fire.")
+        return hidden  # (batch, seq_len, d_model) on CPU
 
 
 def run_extraction(
@@ -282,84 +206,101 @@ def run_extraction(
     max_seq_len: int,
     output_dir: str | Path,
     chunk_size: int = 512,
-    gpu_memory_utilization: float = 0.85,
+    batch_size: int = 512,
     resume: bool = False,
+    seed: int = 42,
 ) -> Path:
     """
     Full Stage 0 pipeline: extract activations for all documents and save to Parquet.
 
+    One Parquet chunk = chunk_size documents. Within each chunk, documents are
+    batched in groups of batch_size for the GPU forward pass.
+
+    The key design: we tokenize each document once (truncated to max_seq_len),
+    select N positions, then run a single left-padded batch forward pass over all
+    documents in the batch. We index into the returned (batch, seq, d_model) tensor
+    at each document's requested positions using the left-padding offset.
+
     Args:
         model_name: HuggingFace model ID.
-        layer_idx: Decoder layer to capture activations at.
-        corpus_name: FineWeb subset name.
+        layer_idx: Target decoder layer index.
+        corpus_name: FineWeb subset name (e.g. "sample-10BT").
         n_docs: Total documents to process.
         positions_per_doc: Activation samples per document.
-        min_position: Minimum token position.
-        max_seq_len: Maximum sequence length.
-        output_dir: Directory to write Parquet files.
-        chunk_size: Documents per Parquet chunk (for resumability).
-        gpu_memory_utilization: vLLM GPU memory fraction.
-        resume: If True, skip already-written chunks.
+        min_position: Minimum token position (skip initial tokens with little context).
+        max_seq_len: Maximum sequence length per document.
+        output_dir: Directory to write Parquet chunk files.
+        chunk_size: Documents per Parquet chunk (for resume granularity).
+        batch_size: Documents per GPU forward pass (max throughput on H100: 512).
+        resume: If True, skip already-written chunk files.
+        seed: Random seed.
 
     Returns:
         Path to the output directory containing Parquet files.
     """
+    np.random.seed(seed)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     extractor = ActivationExtractor(
         model_name=model_name,
         layer_idx=layer_idx,
         max_seq_len=max_seq_len,
-        gpu_memory_utilization=gpu_memory_utilization,
     )
 
     doc_stream = _stream_fineweb(corpus_name, n_docs)
     rows_written = 0
     chunk_idx = 0
-    chunk_docs: list[tuple[str, str]] = []
+    chunk_docs: list[tuple[str, list[int]]] = []  # (doc_id, token_ids)
 
-    pbar = tqdm(total=n_docs, desc="Documents", unit="doc", dynamic_ncols=True)
+    pbar = tqdm(total=n_docs, desc="Extracting", unit="doc", dynamic_ncols=True)
 
-    for doc_id, text in doc_stream:
-        chunk_docs.append((doc_id, text))
-        pbar.update(1)
-
-        if len(chunk_docs) < chunk_size:
-            continue
-
-        chunk_path = output_dir / f"chunk_{chunk_idx:05d}.parquet"
+    def _flush_chunk(docs: list[tuple[str, list[int]]], c_idx: int) -> int:
+        """Process one chunk and return number of rows written."""
+        chunk_path = output_dir / f"chunk_{c_idx:05d}.parquet"
         if resume and chunk_path.exists():
-            logger.info("Skipping existing chunk %d", chunk_idx)
-            chunk_idx += 1
-            chunk_docs = []
-            continue
+            logger.info("Skipping existing chunk %d", c_idx)
+            return 0
 
         rows = _process_chunk(
-            chunk_docs, extractor, tokenizer,
-            layer_idx, positions_per_doc, min_position, max_seq_len,
+            docs=docs,
+            extractor=extractor,
+            tokenizer=tokenizer,
+            layer_idx=layer_idx,
+            positions_per_doc=positions_per_doc,
+            min_position=min_position,
+            batch_size=batch_size,
         )
         _write_parquet(rows, chunk_path)
-        rows_written += len(rows)
         logger.info(
-            "Chunk %d: %d docs → %d activations (total: %d)",
-            chunk_idx, len(chunk_docs), len(rows), rows_written,
+            "Chunk %05d: %d docs → %d activations (total so far: %d)",
+            c_idx, len(docs), len(rows), rows_written + len(rows),
         )
-        chunk_idx += 1
-        chunk_docs = []
         gc.collect()
         torch.cuda.empty_cache()
+        return len(rows)
+
+    for doc_id, text in doc_stream:
+        token_ids = tokenizer.encode(text, add_special_tokens=False)[:max_seq_len]
+        if len(token_ids) <= min_position:
+            pbar.update(1)
+            continue
+        chunk_docs.append((doc_id, token_ids))
+        pbar.update(1)
+
+        if len(chunk_docs) >= chunk_size:
+            rows_written += _flush_chunk(chunk_docs, chunk_idx)
+            chunk_idx += 1
+            chunk_docs = []
 
     # Final partial chunk
     if chunk_docs:
-        chunk_path = output_dir / f"chunk_{chunk_idx:05d}.parquet"
-        rows = _process_chunk(
-            chunk_docs, extractor, tokenizer,
-            layer_idx, positions_per_doc, min_position, max_seq_len,
-        )
-        _write_parquet(rows, chunk_path)
-        rows_written += len(rows)
+        rows_written += _flush_chunk(chunk_docs, chunk_idx)
 
     pbar.close()
     logger.info(
@@ -370,57 +311,80 @@ def run_extraction(
 
 
 def _process_chunk(
-    docs: list[tuple[str, str]],
+    docs: list[tuple[str, list[int]]],
     extractor: ActivationExtractor,
     tokenizer: AutoTokenizer,
     layer_idx: int,
     positions_per_doc: int,
     min_position: int,
-    max_seq_len: int,
+    batch_size: int,
 ) -> list[dict]:
-    """Process one chunk of documents and return a list of row dicts."""
+    """
+    Process one chunk of (doc_id, token_ids) pairs in GPU batches.
+
+    For each mini-batch:
+      1. Left-pad all sequences to the same length.
+      2. Run one GPU forward pass.
+      3. Recover the per-document hidden states from the padded tensor using offsets.
+      4. Extract activations at each requested token position (in original, unpadded coords).
+    """
     rows: list[dict] = []
+    n = len(docs)
 
-    for doc_id, text in docs:
-        token_ids = tokenizer.encode(text, add_special_tokens=False)[:max_seq_len]
-        positions = _select_positions(token_ids, positions_per_doc, min_position)
+    for batch_start in range(0, n, batch_size):
+        batch = docs[batch_start : batch_start + batch_size]
+        ids_list = [ids for _, ids in batch]
+        doc_ids = [did for did, _ in batch]
 
-        for pos in positions:
-            sliced_ids = token_ids[:pos + 1]
-            prompt_text = tokenizer.decode(sliced_ids, skip_special_tokens=True)
-            start = max(0, pos - 5)
-            snippet = tokenizer.decode(token_ids[start:pos + 6])[:200]
+        # Left-pad
+        enc = tokenizer.pad(
+            {"input_ids": ids_list},
+            padding=True,
+            return_tensors="pt",
+        )
+        input_ids = enc["input_ids"]          # (B, L)
+        attention_mask = enc["attention_mask"] # (B, L)
+        padded_len = input_ids.shape[1]
 
-            act = extractor.extract_single(prompt_text)
-            if act is None:
-                logger.warning("No activation for doc=%s pos=%d — skipping", doc_id, pos)
-                continue
+        hidden = extractor.extract_batch(input_ids, attention_mask)
+        # hidden: (B, L, d_model)
 
-            rows.append({
-                "doc_id": doc_id,
-                "token_position": pos,
-                "text_snippet": snippet,
-                "activation_vector": act.tolist(),
-                "layer": layer_idx,
-            })
+        for b_idx, (doc_id, token_ids) in enumerate(zip(doc_ids, ids_list)):
+            seq_len = len(token_ids)
+            # Left-padding offset: last seq_len positions correspond to real tokens
+            pad_offset = padded_len - seq_len
+
+            positions = _select_positions(seq_len, positions_per_doc, min_position)
+            for pos in positions:
+                padded_pos = pad_offset + pos
+                act = hidden[b_idx, padded_pos, :].numpy().astype(np.float32)
+
+                start = max(0, pos - 5)
+                snippet = tokenizer.decode(token_ids[start : pos + 6])[:200]
+
+                rows.append({
+                    "doc_id": doc_id,
+                    "token_position": pos,
+                    "text_snippet": snippet,
+                    "activation_vector": act.tolist(),
+                    "layer": layer_idx,
+                })
 
     return rows
 
 
 def _write_parquet(rows: list[dict], path: Path) -> None:
-    """Write a list of row dicts to a Parquet file using the ACTIVATION_SCHEMA."""
+    """Write a list of row dicts to a zstd-compressed Parquet file."""
     if not rows:
         logger.warning("No rows to write for %s — skipping", path)
         return
-
     table = pa.table(
         {
             "doc_id": pa.array([r["doc_id"] for r in rows], pa.string()),
             "token_position": pa.array([r["token_position"] for r in rows], pa.int32()),
             "text_snippet": pa.array([r["text_snippet"] for r in rows], pa.string()),
             "activation_vector": pa.array(
-                [r["activation_vector"] for r in rows],
-                pa.list_(pa.float32()),
+                [r["activation_vector"] for r in rows], pa.list_(pa.float32())
             ),
             "layer": pa.array([r["layer"] for r in rows], pa.int32()),
         },
@@ -430,7 +394,7 @@ def _write_parquet(rows: list[dict], path: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Stage 0: Extract activations via vLLM")
+    p = argparse.ArgumentParser(description="Stage 0: Extract activations (batched HF)")
     p.add_argument("--config", default="configs/qwen7b_layer20.yaml")
     p.add_argument("--output-dir", default=None, help="Override config output dir")
     p.add_argument("--n-docs", type=int, default=None, help="Override config n_docs")
@@ -466,8 +430,9 @@ def main() -> None:
         max_seq_len=dg["max_seq_len"],
         output_dir=output_dir,
         chunk_size=dg["chunk_size"],
-        gpu_memory_utilization=dg["vllm_gpu_memory_utilization"],
+        batch_size=dg.get("batch_size", 512),
         resume=args.resume,
+        seed=cfg["seed"],
     )
 
 

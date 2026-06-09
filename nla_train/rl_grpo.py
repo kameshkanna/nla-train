@@ -324,8 +324,9 @@ def train_rl_grpo(
     logger.info("Loading AV model from: %s", av_checkpoint)
     av_base = AutoModelForCausalLM.from_pretrained(
         cfg["verbalizer_model"],
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
         device_map="auto",
+        attn_implementation="flash_attention_2",
         trust_remote_code=True,
     )
     av_model = PeftModel.from_pretrained(av_base, av_checkpoint, is_trainable=True)
@@ -334,8 +335,9 @@ def train_rl_grpo(
     logger.info("Loading AR model from: %s", ar_checkpoint)
     ar_base = AutoModelForCausalLM.from_pretrained(
         cfg["target_model"],
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
         device_map="cpu",
+        attn_implementation="flash_attention_2",
         trust_remote_code=True,
     )
     ar_truncated = TruncatedARModel(

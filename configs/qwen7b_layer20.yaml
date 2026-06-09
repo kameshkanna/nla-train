@@ -19,12 +19,12 @@ datagen:
   positions_per_doc: 10             # activation samples per document
   min_token_position: 50            # skip first 50 tokens (insufficient left context)
   max_seq_len: 512                  # truncate docs to this length
-  chunk_size: 512                   # documents per vLLM batch
+  chunk_size: 1024                  # documents per parquet chunk (resume granularity)
+  batch_size: 512                   # documents per GPU forward pass (H100 80GB: 512 fits comfortably)
   av_sft_frac: 0.30                 # 30k docs → AV SFT
   ar_sft_frac: 0.30                 # 30k docs → AR SFT
   rl_frac: 0.40                     # 40k docs → RL
   output_dir: "data/raw"
-  vllm_gpu_memory_utilization: 0.85
 
 injection:
   cjk_range_start: 0x3200           # U+3200 Enclosed CJK Letters begin
@@ -33,7 +33,8 @@ injection:
 
 labeling:
   sglang_url: "http://localhost:30000"
-  batch_size: 32
+  batch_size: 1024                  # rows per asyncio batch (write granularity)
+  concurrency: 64                   # simultaneous SGLang requests (tune vs server capacity)
   max_new_tokens: 150
   temperature: 0.7
   output_dir: "data/labeled"
@@ -51,8 +52,8 @@ ar_sft:
     - "gate_proj"
     - "up_proj"
     - "down_proj"
-  per_device_train_batch_size: 32
-  gradient_accumulation_steps: 8    # effective batch = 256
+  per_device_train_batch_size: 128  # truncated 20-layer model: 128 easily fits in 80GB
+  gradient_accumulation_steps: 2    # effective batch = 256
   learning_rate: 2.0e-5
   lr_scheduler_type: "cosine"
   lr_min_ratio: 0.1                 # final lr = lr * ratio = 2e-6
@@ -60,7 +61,7 @@ ar_sft:
   num_train_epochs: 1
   bf16: true
   gradient_checkpointing: false     # truncated model fits without it
-  dataloader_num_workers: 4
+  dataloader_num_workers: 8
   save_steps: 200
   logging_steps: 10
 
@@ -77,8 +78,8 @@ av_sft:
     - "gate_proj"
     - "up_proj"
     - "down_proj"
-  per_device_train_batch_size: 8
-  gradient_accumulation_steps: 32   # effective batch = 256
+  per_device_train_batch_size: 16   # full 28-layer model + grad checkpointing: 16 safe on 80GB
+  gradient_accumulation_steps: 16   # effective batch = 256
   learning_rate: 2.0e-5
   lr_scheduler_type: "cosine"
   lr_min_ratio: 0.1
@@ -86,7 +87,7 @@ av_sft:
   num_train_epochs: 1
   bf16: true
   gradient_checkpointing: true      # full 28-layer model needs it
-  dataloader_num_workers: 4
+  dataloader_num_workers: 8
   save_steps: 200
   logging_steps: 10
   max_response_length: 150          # cap AV output tokens (matches RL stage)
@@ -97,8 +98,8 @@ grpo:
   max_completion_length: 150
   kl_coef: 0.01
   learning_rate: 1.41e-5
-  per_device_train_batch_size: 4
-  gradient_accumulation_steps: 32   # 128 prompts effective
+  per_device_train_batch_size: 8    # 8 prompts × 8 generations = 64 rollouts per step
+  gradient_accumulation_steps: 16   # 128 prompts effective
   num_train_epochs: 1
   bf16: true
   gradient_checkpointing: true
