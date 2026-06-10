@@ -51,8 +51,8 @@ ar_sft:
     - "gate_proj"
     - "up_proj"
     - "down_proj"
-  per_device_train_batch_size: 32   # 21 layers + LoRA grads; 32×256 fits in 80GB
-  gradient_accumulation_steps: 8    # effective batch = 256
+  per_device_train_batch_size: 64   # 16GB headroom on H100; 64×256 fits
+  gradient_accumulation_steps: 4    # effective batch = 256
   learning_rate: 2.0e-5
   lr_scheduler_type: "cosine"
   lr_min_ratio: 0.1                 # final lr = lr * ratio = 2e-6
