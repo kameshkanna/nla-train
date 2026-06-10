@@ -240,6 +240,7 @@ def train_av_sft(
         parquet_path=Path(data_dir) / "av_sft_train.parquet",
         tokenizer=tokenizer,
         injection_char=injection_char,
+        max_length=av_cfg.get("max_length", 256),
         max_response_length=av_cfg.get("max_response_length", 150),
     )
     loader = DataLoader(

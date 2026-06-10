@@ -86,6 +86,7 @@ av_sft:
   dataloader_num_workers: 8
   save_steps: 200
   logging_steps: 10
+  max_length: 256                   # prompt ~50 tokens + response ~150 = 200 max; 256 is safe ceiling
   max_response_length: 150          # cap AV output tokens (matches RL stage)
 
 grpo:
