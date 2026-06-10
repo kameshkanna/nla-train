@@ -137,7 +137,7 @@ class AVModelWrapper(nn.Module):
         self._injection_scale = injection_scale
         self._current_activations: Optional[torch.Tensor] = None
 
-        self._hook_handle = model.model.embed_tokens.register_forward_hook(
+        self._hook_handle = model.get_input_embeddings().register_forward_hook(
             self._embed_hook
         )
 

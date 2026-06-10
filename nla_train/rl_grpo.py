@@ -44,13 +44,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
 from nla_train.ar_sft import TruncatedARModel, mse_loss_normalized
-from nla_train.injection import (
-    AV_PROMPT_TEMPLATE,
-    AR_PROMPT_TEMPLATE,
-    inject_at_marked_positions,
-    select_injection_token,
-    compute_injection_neighbors,
-)
+from nla_train.injection import AV_PROMPT_TEMPLATE, AR_PROMPT_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +65,10 @@ class RLDataset(Dataset):
         max_prompt_length: int = 300,
     ) -> None:
         table = pq.read_table(parquet_path)
-        self._activations: list[list[float]] = table.column("activation_vector").to_pylist()
+        n = len(table)
+        d = len(table.column("activation_vector")[0].as_py())
+        act_col = table.column("activation_vector").combine_chunks()
+        self._activations: np.ndarray = act_col.values.to_numpy(zero_copy_only=False).reshape(n, d)
         self._tokenizer = tokenizer
         self._injection_char = injection_char
         self._max_prompt_length = max_prompt_length
@@ -80,7 +77,7 @@ class RLDataset(Dataset):
         return len(self._activations)
 
     def __getitem__(self, idx: int) -> dict:
-        activation = self._activations[idx]
+        activation = self._activations[idx].tolist()
         prompt_content = AV_PROMPT_TEMPLATE.format(injection_char=self._injection_char)
         messages = [{"role": "user", "content": prompt_content}]
         prompt: str = self._tokenizer.apply_chat_template(
@@ -104,19 +101,11 @@ class ARRewardModel:
         self,
         ar_model: TruncatedARModel,
         tokenizer: AutoTokenizer,
-        injection_token_id: int,
-        left_neighbor_id: int,
-        right_neighbor_id: int,
-        injection_scale: float,
         device: torch.device,
         max_length: int = 256,
     ) -> None:
         self._ar_model = ar_model
         self._tokenizer = tokenizer
-        self._injection_token_id = injection_token_id
-        self._left_neighbor_id = left_neighbor_id
-        self._right_neighbor_id = right_neighbor_id
-        self._injection_scale = injection_scale
         self._device = device
         self._max_length = max_length
 
@@ -129,6 +118,8 @@ class ARRewardModel:
         """
         Compute GRPO rewards for a batch of AV-generated completions.
 
+        Batches all completions into a single AR forward pass for throughput.
+
         Args:
             completions: List of AV-generated description strings.
             gold_activations: List of gold activation vectors (d_model,) each.
@@ -136,40 +127,31 @@ class ARRewardModel:
         Returns:
             List of scalar rewards, one per completion.
         """
-        rewards: list[float] = []
-        batch_size = len(completions)
-
-        for i in range(batch_size):
-            description = completions[i]
-            gold = torch.tensor(gold_activations[i], dtype=torch.float32)
-
-            prompt = AR_PROMPT_TEMPLATE.format(explanation=description)
-            messages = [{"role": "user", "content": prompt}]
-            formatted: str = self._tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=False
+        prompts = [
+            self._tokenizer.apply_chat_template(
+                [{"role": "user", "content": AR_PROMPT_TEMPLATE.format(explanation=c)}],
+                tokenize=False,
+                add_generation_prompt=False,
             )
-            enc = self._tokenizer(
-                formatted,
-                max_length=self._max_length,
-                truncation=True,
-                padding="max_length",
-                return_tensors="pt",
-            ).to(self._device)
+            for c in completions
+        ]
+        enc = self._tokenizer(
+            prompts,
+            max_length=self._max_length,
+            truncation=True,
+            padding="max_length",
+            return_tensors="pt",
+        ).to(self._device)
 
-            gold_batch = gold.unsqueeze(0).to(self._device)
-            pred = self._ar_model(
-                input_ids=enc["input_ids"],
-                attention_mask=enc["attention_mask"],
-                activation_vectors=gold_batch,
-                injection_token_id=self._injection_token_id,
-                left_neighbor_id=self._left_neighbor_id,
-                right_neighbor_id=self._right_neighbor_id,
-                injection_scale=self._injection_scale,
-            )
-            reward = -float(mse_loss_normalized(pred, gold_batch.float()).item())
-            rewards.append(reward)
-
-        return rewards
+        golds = torch.tensor(gold_activations, dtype=torch.float32, device=self._device)
+        preds = self._ar_model(
+            input_ids=enc["input_ids"],
+            attention_mask=enc["attention_mask"],
+        )
+        pred_norm = torch.nn.functional.normalize(preds, dim=-1)
+        gold_norm = torch.nn.functional.normalize(golds, dim=-1)
+        per_sample_mse = ((pred_norm - gold_norm) ** 2).mean(dim=-1)
+        return (-per_sample_mse).tolist()
 
     def update(
         self,
@@ -191,42 +173,36 @@ class ARRewardModel:
         optimizer = torch.optim.AdamW(self._ar_model.parameters(), lr=lr)
         total_loss = 0.0
 
+        prompts = [
+            self._tokenizer.apply_chat_template(
+                [{"role": "user", "content": AR_PROMPT_TEMPLATE.format(explanation=c)}],
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            for c in completions
+        ]
+        enc = self._tokenizer(
+            prompts,
+            max_length=self._max_length,
+            truncation=True,
+            padding="max_length",
+            return_tensors="pt",
+        ).to(self._device)
+        golds = torch.tensor(gold_activations, dtype=torch.float32, device=self._device)
+
         for _ in range(n_steps):
-            for i in range(len(completions)):
-                description = completions[i]
-                gold = torch.tensor(gold_activations[i], dtype=torch.float32).unsqueeze(0).to(self._device)
-
-                prompt = AR_PROMPT_TEMPLATE.format(explanation=description)
-                messages = [{"role": "user", "content": prompt}]
-                formatted: str = self._tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=False
-                )
-                enc = self._tokenizer(
-                    formatted,
-                    max_length=256,
-                    truncation=True,
-                    padding="max_length",
-                    return_tensors="pt",
-                ).to(self._device)
-
-                pred = self._ar_model(
-                    input_ids=enc["input_ids"],
-                    attention_mask=enc["attention_mask"],
-                    activation_vectors=gold,
-                    injection_token_id=self._injection_token_id,
-                    left_neighbor_id=self._left_neighbor_id,
-                    right_neighbor_id=self._right_neighbor_id,
-                    injection_scale=self._injection_scale,
-                )
-                loss = mse_loss_normalized(pred, gold.float())
-                loss.backward()
-                total_loss += loss.item()
-
+            preds = self._ar_model(
+                input_ids=enc["input_ids"],
+                attention_mask=enc["attention_mask"],
+            )
+            loss = mse_loss_normalized(preds, golds)
+            loss.backward()
+            total_loss += loss.item()
             optimizer.step()
             optimizer.zero_grad()
 
         self._ar_model.eval()
-        return total_loss / (n_steps * len(completions))
+        return total_loss / n_steps
 
 
 def build_reward_fn(
@@ -310,10 +286,6 @@ def train_rl_grpo(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     injection_char = nla_meta["tokens"]["injection_char"]
-    injection_token_id = nla_meta["tokens"]["injection_token_id"]
-    left_neighbor_id = nla_meta["tokens"]["injection_left_neighbor_id"]
-    right_neighbor_id = nla_meta["tokens"]["injection_right_neighbor_id"]
-    injection_scale = nla_meta["extraction"]["injection_scale"]
 
     logger.info("Loading tokenizer: %s", cfg["verbalizer_model"])
     tokenizer = AutoTokenizer.from_pretrained(cfg["verbalizer_model"], trust_remote_code=True)
@@ -340,7 +312,7 @@ def train_rl_grpo(
     )
     ar_truncated = TruncatedARModel(
         base_model=ar_base,
-        n_layers=cfg["target_layer"] + 1,
+        target_layer=cfg["target_layer"],
         d_model=cfg["d_model"],
     )
     del ar_base
@@ -353,10 +325,6 @@ def train_rl_grpo(
     ar_reward_model = ARRewardModel(
         ar_model=ar_truncated,
         tokenizer=tokenizer,
-        injection_token_id=injection_token_id,
-        left_neighbor_id=left_neighbor_id,
-        right_neighbor_id=right_neighbor_id,
-        injection_scale=injection_scale,
         device=device,
     )
 
