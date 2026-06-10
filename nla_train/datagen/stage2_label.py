@@ -6,26 +6,27 @@ activation in the av_sft split to produce gold descriptions. These descriptions
 become the training targets for our AV SFT stage and, via cross-join with the
 ar_sft split, the inputs for our AR SFT stage.
 
-The kitft AV checkpoint is our bootstrap oracle — it replaces the Claude API
-calls used in the original pipeline. This is cheaper, offline-compatible, and
-provides consistent labels aligned with the exact injection protocol we use.
-
 Throughput design:
-  - Uses httpx AsyncClient with asyncio.Semaphore to cap at `concurrency` parallel
-    requests (default 32). This saturates SGLang's request queue without OOM.
-  - Processes in batches of `batch_size` (default 256), writing partial output
-    every batch so we can resume on crash (--resume reads existing output).
+  - Single event loop + persistent httpx.AsyncClient for the entire run.
+    (Old design recreated both every 1024 rows — ~250 TCP handshake storms.)
+  - asyncio.to_thread() for _build_embeds so CPU-bound embedding construction
+    overlaps with in-flight SGLang HTTP requests.
+  - asyncio.Semaphore(concurrency) gates only the HTTP call, not embed building,
+    so SGLang is never idle waiting for the next payload.
+  - Checkpoint written every batch to a .json sidecar so --resume skips
+    already-labeled rows after a crash.
 
 Usage:
     # 1. Start SGLang server first:
-    #    sglang serve --model-path kitft/nla-qwen2.5-7b-L20-av --port 30000 \\
-    #        --disable-radix-cache --mem-fraction-static 0.45
+    #    python -m sglang.launch_server --model-path kitft/nla-qwen2.5-7b-L20-av \\
+    #        --port 30000 --mem-fraction-static 0.45
     #
     # 2. Then run:
     python -m nla_train.datagen.stage2_label \\
         --config configs/qwen7b_layer20.yaml \\
         --input-dir data/split \\
-        --output-dir data/labeled
+        --output-dir data/labeled \\
+        [--resume]
 """
 
 from __future__ import annotations
@@ -83,6 +84,7 @@ def _build_embeds(
     Build the input_embeds array for a single activation vector.
 
     Returns float32 numpy array of shape (seq_len, d_model).
+    CPU-bound — call via asyncio.to_thread to overlap with HTTP I/O.
     """
     prompt_content = AV_PROMPT_TEMPLATE.format(injection_char=injection_char)
     formatted: str = tokenizer.apply_chat_template(
@@ -124,20 +126,46 @@ def _build_embeds(
     return embeds.numpy().astype(np.float32)
 
 
-async def _call_sglang_async(
-    embeds: np.ndarray,
+async def _process_row(
+    idx: int,
+    activation: np.ndarray,
+    tokenizer: AutoTokenizer,
+    embed_weight: torch.Tensor,
+    injection_token_id: int,
+    left_neighbor_id: int,
+    right_neighbor_id: int,
+    injection_scale: float,
+    injection_char: str,
     sglang_url: str,
     max_new_tokens: int,
     temperature: float,
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
-    row_idx: int,
 ) -> tuple[int, str]:
     """
-    Async POST input_embeds to SGLang and extract the explanation text.
+    Build embeds (in thread pool) then POST to SGLang (under semaphore).
 
-    Returns (row_idx, explanation_text) so results can be reordered after gathering.
+    Embed building runs in asyncio.to_thread so it overlaps with other tasks'
+    in-flight HTTP requests — SGLang is never starved waiting for the next payload.
+
+    Returns (row_idx, explanation_text).
     """
+    try:
+        embeds: np.ndarray = await asyncio.to_thread(
+            _build_embeds,
+            activation,
+            tokenizer,
+            embed_weight,
+            injection_token_id,
+            left_neighbor_id,
+            right_neighbor_id,
+            injection_scale,
+            injection_char,
+        )
+    except RuntimeError as e:
+        logger.warning("embed build failed for row %d: %s", idx, e)
+        return idx, ""
+
     payload = {
         "input_embeds": embeds.tolist(),
         "sampling_params": {
@@ -145,26 +173,48 @@ async def _call_sglang_async(
             "max_new_tokens": max_new_tokens,
         },
     }
+    encoded = orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY)
+
     async with semaphore:
         try:
             resp = await client.post(
                 sglang_url.rstrip("/") + "/generate",
-                content=orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY),
+                content=encoded,
                 headers={"Content-Type": "application/json"},
-                timeout=120.0,
+                timeout=180.0,
             )
             resp.raise_for_status()
             text: str = resp.json()["text"]
             m = re.search(r"<explanation>(.*?)</explanation>", text, re.DOTALL)
             explanation = m.group(1).strip() if m else text.strip()
-        except (httpx.HTTPError, RuntimeError, KeyError) as e:
-            logger.warning("Labeling failed for row %d: %s", row_idx, e)
+        except (httpx.HTTPError, KeyError, RuntimeError) as e:
+            logger.warning("SGLang call failed for row %d: %s", idx, e)
             explanation = ""
-    return row_idx, explanation
+
+    return idx, explanation
 
 
-async def _label_batch_async(
-    batch_indices: list[int],
+def _load_checkpoint(path: Path) -> list[str] | None:
+    """Load existing explanations from checkpoint file. Returns None if not found."""
+    if not path.exists():
+        return None
+    with open(path, "rb") as f:
+        data = orjson.loads(f.read())
+    logger.info("Loaded checkpoint with %d rows (%d labeled)", len(data), sum(bool(e) for e in data))
+    return data
+
+
+def _save_checkpoint(explanations: list[str], path: Path) -> None:
+    """Write current explanations list to checkpoint file (atomic via tmp rename)."""
+    tmp = path.with_suffix(".tmp")
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    with open(tmp, "wb") as f:
+        f.write(orjson.dumps(explanations))
+    tmp.rename(path)
+
+
+async def _label_all_async(
+    n_rows: int,
     activations: np.ndarray,
     tokenizer: AutoTokenizer,
     embed_weight: torch.Tensor,
@@ -177,41 +227,70 @@ async def _label_batch_async(
     max_new_tokens: int,
     temperature: float,
     concurrency: int,
-) -> list[tuple[int, str]]:
+    batch_size: int,
+    explanations: list[str],
+    checkpoint_path: Path,
+    pbar: tqdm,
+) -> None:
     """
-    Process a batch of row indices concurrently via async HTTP requests to SGLang.
+    Single-event-loop, single-client labeling loop.
 
-    Returns a list of (row_idx, explanation) pairs in completion order.
+    Processes rows in batches of batch_size for checkpoint granularity.
+    Within each batch, fires all pending tasks concurrently (semaphore-gated).
+    Embed building overlaps with in-flight HTTP calls via asyncio.to_thread.
     """
     semaphore = asyncio.Semaphore(concurrency)
-    limits = httpx.Limits(max_connections=concurrency + 4, max_keepalive_connections=concurrency)
-    async with httpx.AsyncClient(limits=limits) as client:
-        tasks = []
-        for idx in batch_indices:
-            try:
-                embeds = _build_embeds(
-                    activations[idx],
-                    tokenizer,
-                    embed_weight,
-                    injection_token_id,
-                    left_neighbor_id,
-                    right_neighbor_id,
-                    injection_scale,
-                    injection_char,
-                )
-            except RuntimeError as e:
-                logger.warning("embed build failed for row %d: %s", idx, e)
-                tasks.append(asyncio.sleep(0))  # placeholder that returns None
-                continue
-            tasks.append(
-                _call_sglang_async(
-                    embeds, sglang_url, max_new_tokens, temperature, client, semaphore, idx
-                )
-            )
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+    limits = httpx.Limits(
+        max_connections=concurrency + 8,
+        max_keepalive_connections=concurrency,
+    )
 
-    # Filter out None entries from failed embed builds
-    return [(i, e) for item in results if item and len(item) == 2 for i, e in [item]]
+    async with httpx.AsyncClient(limits=limits, timeout=httpx.Timeout(180.0)) as client:
+        for batch_start in range(0, n_rows, batch_size):
+            batch_end = min(batch_start + batch_size, n_rows)
+            pending = [i for i in range(batch_start, batch_end) if not explanations[i]]
+            already_done = (batch_end - batch_start) - len(pending)
+            pbar.update(already_done)
+
+            if not pending:
+                continue
+
+            tasks = [
+                asyncio.create_task(
+                    _process_row(
+                        idx=i,
+                        activation=activations[i],
+                        tokenizer=tokenizer,
+                        embed_weight=embed_weight,
+                        injection_token_id=injection_token_id,
+                        left_neighbor_id=left_neighbor_id,
+                        right_neighbor_id=right_neighbor_id,
+                        injection_scale=injection_scale,
+                        injection_char=injection_char,
+                        sglang_url=sglang_url,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        client=client,
+                        semaphore=semaphore,
+                    )
+                )
+                for i in pending
+            ]
+
+            for coro in asyncio.as_completed(tasks):
+                try:
+                    idx, expl = await coro
+                    explanations[idx] = expl
+                except Exception as e:
+                    logger.warning("Unexpected error in task: %s", e)
+                pbar.update(1)
+
+            _save_checkpoint(explanations, checkpoint_path)
+            logger.info(
+                "Checkpoint: %d/%d labeled (%.1f%%)",
+                sum(bool(e) for e in explanations), n_rows,
+                100 * sum(bool(e) for e in explanations) / n_rows,
+            )
 
 
 def generate_labels(
@@ -227,13 +306,14 @@ def generate_labels(
     temperature: float,
     injection_cache_path: str | Path,
     nla_meta_output_path: str | Path,
+    resume: bool = False,
     seed: int = 42,
 ) -> int:
     """
     Run the AV labeling pipeline on the av_sft split.
 
-    Processes in batches of `batch_size` rows. Within each batch, up to
-    `concurrency` SGLang requests run in parallel via asyncio.
+    Single asyncio.run() wraps the entire dataset so the event loop and HTTP
+    connection pool live for the full run — no per-batch teardown/setup overhead.
 
     Args:
         input_parquet: Path to av_sft.parquet from Stage 1.
@@ -242,12 +322,13 @@ def generate_labels(
         d_model: Target model hidden dimension.
         layer_idx: Extraction layer.
         sglang_url: Running SGLang AV server URL.
-        batch_size: Rows per async batch (controls write granularity).
-        concurrency: Max simultaneous SGLang requests within a batch.
+        batch_size: Rows per checkpoint batch (not per HTTP burst).
+        concurrency: Max simultaneous SGLang requests.
         max_new_tokens: Max tokens per verbalization.
         temperature: Sampling temperature.
         injection_cache_path: Cache path for injection token selection.
         nla_meta_output_path: Where to write the nla_meta.yaml sidecar.
+        resume: If True, load existing checkpoint and skip already-labeled rows.
         seed: Random seed.
 
     Returns:
@@ -297,54 +378,66 @@ def generate_labels(
     snippets = table.column("text_snippet").to_pylist()
     layers = table.column("layer").to_pylist()
 
-    explanations: list[str] = [""] * n_rows
-    pbar = tqdm(total=n_rows, desc="Labeling", unit="row", dynamic_ncols=True)
+    checkpoint_path = Path(output_parquet).with_suffix(".checkpoint.json")
+    explanations: list[str] = []
+    if resume:
+        existing = _load_checkpoint(checkpoint_path)
+        if existing and len(existing) == n_rows:
+            explanations = existing
+        else:
+            logger.warning("Checkpoint mismatch or missing — starting fresh")
+            explanations = [""] * n_rows
+    else:
+        explanations = [""] * n_rows
 
-    for batch_start in range(0, n_rows, batch_size):
-        batch_indices = list(range(batch_start, min(batch_start + batch_size, n_rows)))
+    n_already = sum(bool(e) for e in explanations)
+    logger.info("Starting labeling: %d to label, %d already done", n_rows - n_already, n_already)
 
-        results = asyncio.run(
-            _label_batch_async(
-                batch_indices=batch_indices,
-                activations=activations,
-                tokenizer=tokenizer,
-                embed_weight=embed_weight,
-                injection_token_id=injection_token_id,
-                left_neighbor_id=left_neighbor_id,
-                right_neighbor_id=right_neighbor_id,
-                injection_scale=injection_scale,
-                injection_char=injection_char,
-                sglang_url=sglang_url,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                concurrency=concurrency,
-            )
+    pbar = tqdm(total=n_rows, initial=0, desc="Labeling", unit="row", dynamic_ncols=True)
+    t0 = time.monotonic()
+
+    asyncio.run(
+        _label_all_async(
+            n_rows=n_rows,
+            activations=activations,
+            tokenizer=tokenizer,
+            embed_weight=embed_weight,
+            injection_token_id=injection_token_id,
+            left_neighbor_id=left_neighbor_id,
+            right_neighbor_id=right_neighbor_id,
+            injection_scale=injection_scale,
+            injection_char=injection_char,
+            sglang_url=sglang_url,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            concurrency=concurrency,
+            batch_size=batch_size,
+            explanations=explanations,
+            checkpoint_path=checkpoint_path,
+            pbar=pbar,
         )
-        for idx, expl in results:
-            explanations[idx] = expl
-
-        pbar.update(len(batch_indices))
-        done = batch_start + len(batch_indices)
-        if done % 10000 == 0 or done == n_rows:
-            logger.info("Labeled %d/%d", done, n_rows)
+    )
 
     pbar.close()
+    elapsed = time.monotonic() - t0
+    n_valid = sum(bool(e) for e in explanations)
+    logger.info(
+        "Labeling complete: %d/%d valid (%.1f%%) in %.1fmin",
+        n_valid, n_rows, 100 * n_valid / n_rows, elapsed / 60,
+    )
 
-    valid_mask = [bool(e) for e in explanations]
-    n_valid = sum(valid_mask)
-    logger.info("Valid labels: %d/%d (%.1f%%)", n_valid, n_rows, 100 * n_valid / n_rows)
-
+    valid_indices = [i for i, e in enumerate(explanations) if e]
     out_table = pa.table(
         {
-            "doc_id": pa.array([doc_ids[i] for i, v in enumerate(valid_mask) if v]),
-            "token_position": pa.array([positions[i] for i, v in enumerate(valid_mask) if v], pa.int32()),
-            "text_snippet": pa.array([snippets[i] for i, v in enumerate(valid_mask) if v]),
+            "doc_id": pa.array([doc_ids[i] for i in valid_indices]),
+            "token_position": pa.array([positions[i] for i in valid_indices], pa.int32()),
+            "text_snippet": pa.array([snippets[i] for i in valid_indices]),
             "activation_vector": pa.array(
-                [activations[i].tolist() for i, v in enumerate(valid_mask) if v],
+                [activations[i].tolist() for i in valid_indices],
                 pa.list_(pa.float32()),
             ),
-            "layer": pa.array([layers[i] for i, v in enumerate(valid_mask) if v], pa.int32()),
-            "explanation": pa.array([explanations[i] for i, v in enumerate(valid_mask) if v]),
+            "layer": pa.array([layers[i] for i in valid_indices], pa.int32()),
+            "explanation": pa.array([explanations[i] for i in valid_indices]),
         },
         schema=LABELED_SCHEMA,
     )
@@ -352,6 +445,11 @@ def generate_labels(
     Path(output_parquet).parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(out_table, output_parquet, compression="zstd")
     logger.info("Wrote %d labeled rows → %s", n_valid, output_parquet)
+
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+        logger.info("Removed checkpoint file")
+
     return n_valid
 
 
@@ -360,6 +458,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", default="configs/qwen7b_layer20.yaml")
     p.add_argument("--input-dir", default=None)
     p.add_argument("--output-dir", default=None)
+    p.add_argument("--resume", action="store_true", help="Resume from checkpoint, skip labeled rows")
     return p.parse_args()
 
 
@@ -388,12 +487,13 @@ def main() -> None:
         d_model=cfg["d_model"],
         layer_idx=cfg["target_layer"],
         sglang_url=lab["sglang_url"],
-        batch_size=lab.get("batch_size", 256),
-        concurrency=lab.get("concurrency", 32),
+        batch_size=lab.get("batch_size", 1024),
+        concurrency=lab.get("concurrency", 128),
         max_new_tokens=lab["max_new_tokens"],
         temperature=lab["temperature"],
         injection_cache_path=inj["cache_file"],
         nla_meta_output_path=output_dir / "nla_meta_av.yaml",
+        resume=args.resume,
         seed=cfg["seed"],
     )
 

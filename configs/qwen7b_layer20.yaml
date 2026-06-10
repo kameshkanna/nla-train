@@ -20,7 +20,7 @@ datagen:
   min_token_position: 50            # skip first 50 tokens (insufficient left context)
   max_seq_len: 2048                 # matches kitft stage0 max_length=2048
   chunk_size: 1024                  # documents per parquet chunk (resume granularity)
-  batch_size: 128                   # documents per GPU forward pass (seq_len=2048: 128 safe on 80GB)
+  batch_size: 16                    # SGLang takes ~38GB, stage0 model ~15GB, 16 docs × 2048 fits in remaining ~26GB
   av_sft_frac: 0.25                 # 25k docs → AV SFT (matches kitft 25/25/50 split)
   ar_sft_frac: 0.25                 # 25k docs → AR SFT
   rl_frac: 0.50                     # 50k docs → RL
@@ -34,7 +34,7 @@ injection:
 labeling:
   sglang_url: "http://localhost:30000"
   batch_size: 1024                  # rows per asyncio batch (write granularity)
-  concurrency: 64                   # simultaneous SGLang requests (tune vs server capacity)
+  concurrency: 128                  # simultaneous SGLang requests (persistent client, overlap embed+HTTP)
   max_new_tokens: 300               # matches kitft stage2 claude-haiku max_tokens=300
   temperature: 0.7
   output_dir: "data/labeled"
