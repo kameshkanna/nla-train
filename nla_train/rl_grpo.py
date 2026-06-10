@@ -363,6 +363,9 @@ def train_rl_grpo(
         logging_steps=grpo_cfg["logging_steps"],
         seed=seed,
         report_to="none",
+        use_vllm=True,
+        vllm_gpu_memory_utilization=0.35,  # ~28GB for vLLM; training model keeps ~45GB
+        vllm_device="cuda:0",
     )
     # num_generations vs num_sample_generations across TRL versions
     if "num_generations" in _grpo_params:
