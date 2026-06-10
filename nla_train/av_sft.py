@@ -116,9 +116,11 @@ class AVModelWrapper(nn.Module):
     Wraps a LoRA-patched AV model to perform embedding injection before
     each forward pass.
 
-    This wrapper is needed because HuggingFace Trainer does not support
-    arbitrary preprocessing inside the model forward — we intercept at
-    the embedding layer via a registered forward hook.
+    Injection is done by computing inputs_embeds directly (bypassing the
+    embed_tokens call inside the model), injecting activation vectors in-place
+    on that fresh tensor, then passing inputs_embeds to the model. This avoids
+    the hook + gradient-checkpointing recomputation conflict where a saved
+    leaf tensor cannot be modified in-place.
     """
 
     def __init__(
@@ -135,28 +137,6 @@ class AVModelWrapper(nn.Module):
         self._left_neighbor_id = left_neighbor_id
         self._right_neighbor_id = right_neighbor_id
         self._injection_scale = injection_scale
-        self._current_activations: Optional[torch.Tensor] = None
-
-        self._hook_handle = model.get_input_embeddings().register_forward_hook(
-            self._embed_hook
-        )
-
-    def _embed_hook(
-        self, module: nn.Module, inp: tuple, out: torch.Tensor
-    ) -> torch.Tensor:
-        """Intercept embeddings and inject activation vectors."""
-        if self._current_activations is None:
-            return out
-        input_ids = inp[0]
-        return inject_at_marked_positions(
-            input_ids=input_ids,
-            embeddings=out,
-            activation_vectors=self._current_activations,
-            injection_token_id=self._injection_token_id,
-            left_neighbor_id=self._left_neighbor_id,
-            right_neighbor_id=self._right_neighbor_id,
-            injection_scale=self._injection_scale,
-        )
 
     def forward(
         self,
@@ -166,19 +146,28 @@ class AVModelWrapper(nn.Module):
         activation_vectors: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> object:
-        self._current_activations = activation_vectors
-        try:
-            output = self.model(
+        embed_layer = self.model.get_input_embeddings()
+        inputs_embeds = embed_layer(input_ids)  # non-leaf, safe for in-place injection
+
+        if activation_vectors is not None:
+            inputs_embeds = inject_at_marked_positions(
                 input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=labels,
+                embeddings=inputs_embeds,
+                activation_vectors=activation_vectors,
+                injection_token_id=self._injection_token_id,
+                left_neighbor_id=self._left_neighbor_id,
+                right_neighbor_id=self._right_neighbor_id,
+                injection_scale=self._injection_scale,
             )
-        finally:
-            self._current_activations = None
-        return output
+
+        return self.model(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
 
     def remove_hooks(self) -> None:
-        self._hook_handle.remove()
+        pass  # no hooks registered
 
 
 def train_av_sft(

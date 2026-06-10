@@ -212,7 +212,6 @@ def inject_at_marked_positions(
         RuntimeError: If the injection position cannot be found for any sequence
             in the batch, which indicates a template or tokenization mismatch.
     """
-    embeddings = embeddings.clone()
     batch_size, seq_len = input_ids.shape
     ids_np = input_ids.cpu().numpy()
 
