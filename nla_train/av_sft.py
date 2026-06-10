@@ -147,7 +147,7 @@ class AVModelWrapper(nn.Module):
         **kwargs,
     ) -> object:
         embed_layer = self.model.get_input_embeddings()
-        inputs_embeds = embed_layer(input_ids)  # non-leaf, safe for in-place injection
+        inputs_embeds = embed_layer(input_ids).clone()  # clone breaks view of weight matrix
 
         if activation_vectors is not None:
             inputs_embeds = inject_at_marked_positions(
