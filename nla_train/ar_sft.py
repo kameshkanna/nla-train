@@ -93,13 +93,15 @@ class TruncatedARModel(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor,
+        input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         activation_vectors: Optional[torch.Tensor] = None,
         injection_token_id: Optional[int] = None,
         left_neighbor_id: Optional[int] = None,
         right_neighbor_id: Optional[int] = None,
         injection_scale: Optional[float] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         """
         Forward pass with optional activation injection.
@@ -115,7 +117,10 @@ class TruncatedARModel(nn.Module):
         Returns:
             Tensor of shape (batch, d_model) — value head output at the last token.
         """
-        hidden = self.embed_tokens(input_ids)  # (batch, seq, d_model)
+        if inputs_embeds is not None:
+            hidden = inputs_embeds
+        else:
+            hidden = self.embed_tokens(input_ids)  # (batch, seq, d_model)
 
         if activation_vectors is not None:
             hidden = inject_at_marked_positions(
