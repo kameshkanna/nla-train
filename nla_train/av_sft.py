@@ -213,7 +213,7 @@ def train_av_sft(
     tokenizer = AutoTokenizer.from_pretrained(cfg["verbalizer_model"], trust_remote_code=True)
     base_model = AutoModelForCausalLM.from_pretrained(
         cfg["verbalizer_model"],
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )

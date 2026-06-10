@@ -324,7 +324,7 @@ def train_rl_grpo(
     logger.info("Loading AV model from: %s", av_checkpoint)
     av_base = AutoModelForCausalLM.from_pretrained(
         cfg["verbalizer_model"],
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -334,7 +334,7 @@ def train_rl_grpo(
     logger.info("Loading AR model from: %s", ar_checkpoint)
     ar_base = AutoModelForCausalLM.from_pretrained(
         cfg["target_model"],
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="cpu",
         trust_remote_code=True,
     )
