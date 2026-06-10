@@ -374,10 +374,17 @@ def train_rl_grpo(
         _grpo_kwargs["beta"] = grpo_cfg["kl_coef"]
     elif "kl_coef" in _grpo_params:
         _grpo_kwargs["kl_coef"] = grpo_cfg["kl_coef"]
-    # vLLM generation speedup — only add params the installed TRL version supports
+    # vLLM generation speedup — API varies across TRL versions:
+    #   TRL <0.18:  vllm_device="cuda:0"
+    #   TRL >=0.18: vllm_mode="colocate" (vllm_device removed)
+    # Guard every param through the inspect check so the code runs on any version.
     _vllm_kwargs = {
         "use_vllm": True,
         "vllm_gpu_memory_utilization": 0.35,
+        # TRL 1.5.1 / >=0.18 API
+        "vllm_mode": "colocate",
+        "vllm_tensor_parallel_size": 1,
+        # TRL <0.18 API (kept for backwards compat — ignored on newer TRL)
         "vllm_device": "cuda:0",
     }
     for k, v in _vllm_kwargs.items():
