@@ -342,7 +342,7 @@ def generate_labels(
 
     logger.info("Loading embedding table (CPU only — then freed)")
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.bfloat16, device_map="cpu", trust_remote_code=True
+        model_name, dtype=torch.bfloat16, device_map="cpu", trust_remote_code=True
     )
     embed_weight = model.get_input_embeddings().weight.detach().float().cpu()
     del model
@@ -358,7 +358,10 @@ def generate_labels(
     n_rows = len(table)
     logger.info("Rows to label: %d", n_rows)
 
-    activations = np.array(table.column("activation_vector").to_pylist(), dtype=np.float32)
+    # Fast path: Arrow list<float32> → flat buffer → reshape.
+    # Avoids materializing 250k Python list objects (to_pylist is 5-10x slower).
+    act_col = table.column("activation_vector").combine_chunks()
+    activations = act_col.values.to_numpy(zero_copy_only=False).reshape(n_rows, d_model)
     injection_scale = compute_injection_scale(activations)
 
     write_nla_meta(
