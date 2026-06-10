@@ -206,12 +206,13 @@ def inject_at_marked_positions(
         injection_scale: Scale applied after L2-normalization.
 
     Returns:
-        Modified embeddings tensor (same object, modified in-place).
+        Modified embeddings tensor (cloned to avoid in-place grad errors).
 
     Raises:
         RuntimeError: If the injection position cannot be found for any sequence
             in the batch, which indicates a template or tokenization mismatch.
     """
+    embeddings = embeddings.clone()
     batch_size, seq_len = input_ids.shape
     ids_np = input_ids.cpu().numpy()
 
