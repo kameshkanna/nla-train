@@ -59,7 +59,10 @@ class AVDataset(Dataset):
     ) -> None:
         table = pq.read_table(parquet_path)
         self._explanations: list[str] = table.column("explanation").to_pylist()
-        self._activations: list[list[float]] = table.column("activation_vector").to_pylist()
+        n = len(table)
+        d = len(table.column("activation_vector")[0].as_py())
+        act_col = table.column("activation_vector").combine_chunks()
+        self._activations: np.ndarray = act_col.values.to_numpy(zero_copy_only=False).reshape(n, d)
         self._tokenizer = tokenizer
         self._injection_char = injection_char
         self._max_length = max_length
@@ -70,7 +73,7 @@ class AVDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         explanation = self._explanations[idx]
-        activation = torch.tensor(self._activations[idx], dtype=torch.float32)
+        activation = torch.from_numpy(self._activations[idx].copy())
 
         prompt_content = AV_PROMPT_TEMPLATE.format(injection_char=self._injection_char)
         response = f"<explanation>{explanation}</explanation>"
@@ -157,18 +160,21 @@ class AVModelWrapper(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor,
+        input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
         activation_vectors: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> object:
         self._current_activations = activation_vectors
-        output = self.model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels,
-        )
-        self._current_activations = None
+        try:
+            output = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+            )
+        finally:
+            self._current_activations = None
         return output
 
     def remove_hooks(self) -> None:
@@ -200,9 +206,6 @@ def train_av_sft(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("Device: %s", device)
-
     injection_char = nla_meta["tokens"]["injection_char"]
     injection_token_id = nla_meta["tokens"]["injection_token_id"]
     left_neighbor_id = nla_meta["tokens"]["injection_left_neighbor_id"]
@@ -211,12 +214,16 @@ def train_av_sft(
 
     logger.info("Loading tokenizer + model: %s", cfg["verbalizer_model"])
     tokenizer = AutoTokenizer.from_pretrained(cfg["verbalizer_model"], trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     base_model = AutoModelForCausalLM.from_pretrained(
         cfg["verbalizer_model"],
         dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=True,
     )
+    device = next(base_model.parameters()).device
+    logger.info("Model loaded on device: %s", device)
 
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -230,7 +237,7 @@ def train_av_sft(
     lora_model.print_trainable_parameters()
 
     if av_cfg.get("gradient_checkpointing"):
-        lora_model.gradient_checkpointing_enable()
+        lora_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
     av_model = AVModelWrapper(
         model=lora_model,
