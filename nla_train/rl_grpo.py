@@ -347,7 +347,10 @@ def train_rl_grpo(
     output_dir = Path(grpo_cfg["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    grpo_training_args = GRPOConfig(
+    import inspect as _inspect
+    _grpo_params = set(_inspect.signature(GRPOConfig.__init__).parameters)
+
+    _grpo_kwargs: dict = dict(
         output_dir=str(output_dir),
         num_train_epochs=grpo_cfg["num_train_epochs"],
         per_device_train_batch_size=grpo_cfg["per_device_train_batch_size"],
@@ -355,14 +358,24 @@ def train_rl_grpo(
         learning_rate=grpo_cfg["learning_rate"],
         bf16=grpo_cfg["bf16"],
         gradient_checkpointing=grpo_cfg.get("gradient_checkpointing", True),
-        num_generations=grpo_cfg["num_generations"],
         max_completion_length=grpo_cfg["max_completion_length"],
-        kl_coef=grpo_cfg["kl_coef"],
         save_steps=grpo_cfg["save_steps"],
         logging_steps=grpo_cfg["logging_steps"],
         seed=seed,
         report_to="none",
     )
+    # num_generations vs num_sample_generations across TRL versions
+    if "num_generations" in _grpo_params:
+        _grpo_kwargs["num_generations"] = grpo_cfg["num_generations"]
+    elif "num_sample_generations" in _grpo_params:
+        _grpo_kwargs["num_sample_generations"] = grpo_cfg["num_generations"]
+    # kl_coef renamed to beta in TRL >= 0.9
+    if "beta" in _grpo_params:
+        _grpo_kwargs["beta"] = grpo_cfg["kl_coef"]
+    elif "kl_coef" in _grpo_params:
+        _grpo_kwargs["kl_coef"] = grpo_cfg["kl_coef"]
+
+    grpo_training_args = GRPOConfig(**_grpo_kwargs)
 
     trainer = GRPOTrainer(
         model=av_model,
