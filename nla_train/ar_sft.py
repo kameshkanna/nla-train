@@ -60,36 +60,47 @@ from nla_train.injection import (
 logger = logging.getLogger(__name__)
 
 
+class _StopForward(Exception):
+    pass
+
+
 class TruncatedARModel(nn.Module):
     """
-    Qwen2.5-7B-Instruct truncated to the first `n_layers` decoder layers.
+    Qwen2.5-7B-Instruct with a StopForward hook at target_layer.
 
-    Exposes only the embedding layer, the first n_layers transformer blocks,
-    and a linear value head. No final LayerNorm — we want the raw residual
-    stream at the truncation point to match what was extracted during datagen.
+    Uses the full model's forward pass (so RoPE, attention masks, etc. are all
+    handled correctly by transformers internals), but aborts after target_layer
+    via a hook. The captured hidden state is passed through a linear value head.
 
     Args:
-        base_model: Full HuggingFace causal LM (only its layers are used).
-        n_layers: Number of decoder layers to keep (= target_layer + 1).
+        base_model: Full HuggingFace causal LM.
+        target_layer: Index of the layer to capture (0-indexed).
         d_model: Hidden dimension.
     """
 
     def __init__(
         self,
         base_model: AutoModelForCausalLM,
-        n_layers: int,
+        target_layer: int,
         d_model: int,
     ) -> None:
         super().__init__()
-        self.embed_tokens = base_model.model.embed_tokens
-        self.layers = nn.ModuleList(list(base_model.model.layers[:n_layers]))
+        self.backbone = base_model
         self.d_model = d_model
+        self._hidden: Optional[torch.Tensor] = None
 
         # Value head: d_model → d_model, initialized to identity.
-        # Identity init yields ~17% better loss vs Kaiming on NLA (per kitft notes).
         self.value_head = nn.Linear(d_model, d_model, bias=False)
         with torch.no_grad():
             self.value_head.weight.copy_(torch.eye(d_model))
+
+        # Hook aborts forward after target_layer and stores hidden state.
+        def _hook(module: nn.Module, inp: tuple, out: object) -> None:
+            h = out[0] if isinstance(out, tuple) else out
+            self._hidden = h
+            raise _StopForward
+
+        self.backbone.model.layers[target_layer].register_forward_hook(_hook)
 
     def forward(
         self,
@@ -99,30 +110,27 @@ class TruncatedARModel(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         """
-        Forward pass: plain text → value head output.
-
-        AR does NOT use activation injection — it takes the explanation as plain
-        tokenized text and reconstructs the activation via the value head at the
-        last token position. Injection is the AV model's job.
-
-        Args:
-            input_ids: (batch, seq_len) long tensor.
-            attention_mask: (batch, seq_len) long tensor.
-            inputs_embeds: passed by PEFT internals; used instead of input_ids when set.
+        Run backbone until target_layer (StopForward aborts the rest), then
+        apply value head to last real token position.
 
         Returns:
-            Tensor of shape (batch, d_model) — value head output at last real token.
+            Tensor of shape (batch, d_model).
         """
-        if inputs_embeds is not None:
-            hidden = inputs_embeds
-        else:
-            hidden = self.embed_tokens(input_ids)  # (batch, seq, d_model)
+        self._hidden = None
+        try:
+            self.backbone(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+            )
+        except _StopForward:
+            pass
 
-        for layer in self.layers:
-            layer_out = layer(hidden, attention_mask=attention_mask)
-            hidden = layer_out[0] if isinstance(layer_out, tuple) else layer_out
+        if self._hidden is None:
+            raise RuntimeError("StopForward hook did not fire — check target_layer index.")
 
-        # Extract last real token position per sequence
+        hidden = self._hidden  # (batch, seq, d_model)
+
         if attention_mask is not None:
             lengths = attention_mask.sum(dim=1) - 1
             last_pos = lengths.clamp(min=0).long()
@@ -131,7 +139,6 @@ class TruncatedARModel(nn.Module):
                 (hidden.size(0),), hidden.size(1) - 1, dtype=torch.long, device=hidden.device
             )
         last_hidden = hidden[torch.arange(hidden.size(0), device=hidden.device), last_pos]
-
         return self.value_head(last_hidden)  # (batch, d_model)
 
 
@@ -250,10 +257,9 @@ def train_ar_sft(
         trust_remote_code=True,
     )
 
-    n_layers = cfg["target_layer"] + 1
     ar_model = TruncatedARModel(
         base_model=base_model,
-        n_layers=n_layers,
+        target_layer=cfg["target_layer"],
         d_model=cfg["d_model"],
     )
     del base_model
