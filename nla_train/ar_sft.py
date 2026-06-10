@@ -149,7 +149,7 @@ class TruncatedARModel(nn.Module):
                 (hidden.size(0),), hidden.size(1) - 1, dtype=torch.long, device=hidden.device
             )
         last_hidden = hidden[torch.arange(hidden.size(0), device=hidden.device), last_pos]
-        return self.value_head(last_hidden)  # (batch, d_model)
+        return self.value_head(last_hidden.to(self.value_head.weight.dtype))  # (batch, d_model)
 
 
 class ARDataset(Dataset):
