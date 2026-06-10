@@ -85,9 +85,19 @@ class TruncatedARModel(nn.Module):
         d_model: int,
     ) -> None:
         super().__init__()
-        self.backbone = base_model
         self.d_model = d_model
         self._hidden: Optional[torch.Tensor] = None
+
+        # Drop layers above target_layer and the lm_head — they consume GPU memory
+        # but are never executed (StopForward aborts before them).
+        del base_model.model.layers[target_layer + 1:]
+        if hasattr(base_model, "lm_head"):
+            del base_model.lm_head
+        if hasattr(base_model.model, "norm"):
+            del base_model.model.norm
+        gc.collect()
+
+        self.backbone = base_model
 
         # Value head: d_model → d_model, initialized to identity.
         self.value_head = nn.Linear(d_model, d_model, bias=False)

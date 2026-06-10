@@ -33,7 +33,7 @@ injection:
 
 labeling:
   sglang_url: "http://localhost:30000"  # unused now (direct HF inference)
-  hf_batch_size: 64                 # sequences per GPU forward pass (direct HF, no SGLang)
+  hf_batch_size: 128                # sequences per GPU forward pass — Qwen GQA KV cache ~3GB at B=128
   max_new_tokens: 300               # matches kitft stage2 claude-haiku max_tokens=300
   temperature: 0.7
   output_dir: "data/labeled"
@@ -51,8 +51,8 @@ ar_sft:
     - "gate_proj"
     - "up_proj"
     - "down_proj"
-  per_device_train_batch_size: 128  # truncated 20-layer model: 128 easily fits in 80GB
-  gradient_accumulation_steps: 2    # effective batch = 256
+  per_device_train_batch_size: 32   # 21 layers + LoRA grads; 32×256 fits in 80GB
+  gradient_accumulation_steps: 8    # effective batch = 256
   learning_rate: 2.0e-5
   lr_scheduler_type: "cosine"
   lr_min_ratio: 0.1                 # final lr = lr * ratio = 2e-6
