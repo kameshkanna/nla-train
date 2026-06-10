@@ -7,7 +7,9 @@
 #        source sglang-env/bin/activate
 #        python -m sglang.launch_server \
 #            --model-path kitft/nla-qwen2.5-7b-L20-av \
-#            --port 30000 --disable-radix-cache --mem-fraction-static 0.45
+#            --port 30000 --disable-radix-cache \
+#            --mem-fraction-static 0.88 \
+#            --max-running-requests 256
 #      Wait for "Server is ready" before running stage 2.
 #
 # Usage:
