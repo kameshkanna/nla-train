@@ -95,43 +95,28 @@ class TruncatedARModel(nn.Module):
         self,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        activation_vectors: Optional[torch.Tensor] = None,
-        injection_token_id: Optional[int] = None,
-        left_neighbor_id: Optional[int] = None,
-        right_neighbor_id: Optional[int] = None,
-        injection_scale: Optional[float] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
-        Forward pass with optional activation injection.
+        Forward pass: plain text → value head output.
+
+        AR does NOT use activation injection — it takes the explanation as plain
+        tokenized text and reconstructs the activation via the value head at the
+        last token position. Injection is the AV model's job.
 
         Args:
             input_ids: (batch, seq_len) long tensor.
-            attention_mask: (batch, seq_len) float tensor.
-            activation_vectors: (batch, d_model) float tensor of gold activations.
-                If provided, the embedding at the injection position is replaced.
-            injection_token_id / left_neighbor_id / right_neighbor_id / injection_scale:
-                Injection protocol parameters. Required when activation_vectors is set.
+            attention_mask: (batch, seq_len) long tensor.
+            inputs_embeds: passed by PEFT internals; used instead of input_ids when set.
 
         Returns:
-            Tensor of shape (batch, d_model) — value head output at the last token.
+            Tensor of shape (batch, d_model) — value head output at last real token.
         """
         if inputs_embeds is not None:
             hidden = inputs_embeds
         else:
             hidden = self.embed_tokens(input_ids)  # (batch, seq, d_model)
-
-        if activation_vectors is not None:
-            hidden = inject_at_marked_positions(
-                input_ids=input_ids,
-                embeddings=hidden,
-                activation_vectors=activation_vectors,
-                injection_token_id=injection_token_id,
-                left_neighbor_id=left_neighbor_id,
-                right_neighbor_id=right_neighbor_id,
-                injection_scale=injection_scale,
-            )
 
         for layer in self.layers:
             layer_out = layer(hidden, attention_mask=attention_mask)
@@ -253,10 +238,6 @@ def train_ar_sft(
     logger.info("Device: %s", device)
 
     injection_char = nla_meta["tokens"]["injection_char"]
-    injection_token_id = nla_meta["tokens"]["injection_token_id"]
-    left_neighbor_id = nla_meta["tokens"]["injection_left_neighbor_id"]
-    right_neighbor_id = nla_meta["tokens"]["injection_right_neighbor_id"]
-    injection_scale = nla_meta["extraction"]["injection_scale"]
 
     logger.info("Loading tokenizer: %s", cfg["target_model"])
     tokenizer = AutoTokenizer.from_pretrained(cfg["target_model"], trust_remote_code=True)
@@ -334,11 +315,6 @@ def train_ar_sft(
                 predictions = ar_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    activation_vectors=activation_vectors,
-                    injection_token_id=injection_token_id,
-                    left_neighbor_id=left_neighbor_id,
-                    right_neighbor_id=right_neighbor_id,
-                    injection_scale=injection_scale,
                 )
                 loss = mse_loss_normalized(predictions, activation_vectors.float())
                 loss = loss / accum_steps
