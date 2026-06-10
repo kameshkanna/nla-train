@@ -10,6 +10,7 @@ CONFIG="${1:-configs/qwen7b_layer20.yaml}"
 AV_CKPT="${2:-checkpoints/av_sft/final}"
 AR_CKPT="${3:-checkpoints/ar_sft/final}"
 
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 echo "==> RL GRPO: Joint AV + AR training"
 echo "    AV checkpoint: $AV_CKPT"
 echo "    AR checkpoint: $AR_CKPT"

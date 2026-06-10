@@ -9,7 +9,7 @@ set -euo pipefail
 CONFIG="${1:-configs/qwen7b_layer20.yaml}"
 
 echo "==> AV SFT: Training Activation Verbalizer"
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 python -m nla_train.av_sft \
     --config "$CONFIG" \
     --data-dir data/train \
