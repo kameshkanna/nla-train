@@ -159,9 +159,13 @@ class ARDataset(Dataset):
         injection_char: str,
         max_length: int = 256,
     ) -> None:
+        import numpy as np
         table = pq.read_table(parquet_path)
         self._explanations: list[str] = table.column("explanation").to_pylist()
-        self._activations: list[list[float]] = table.column("activation_vector").to_pylist()
+        n = len(table)
+        d = len(table.column("activation_vector")[0].as_py())
+        act_col = table.column("activation_vector").combine_chunks()
+        self._activations: np.ndarray = act_col.values.to_numpy(zero_copy_only=False).reshape(n, d)
         self._tokenizer = tokenizer
         self._injection_char = injection_char
         self._max_length = max_length
@@ -171,7 +175,7 @@ class ARDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         explanation = self._explanations[idx]
-        activation = torch.tensor(self._activations[idx], dtype=torch.float32)
+        activation = torch.from_numpy(self._activations[idx].copy())
 
         prompt = AR_PROMPT_TEMPLATE.format(explanation=explanation)
         messages = [{"role": "user", "content": prompt}]
@@ -281,6 +285,7 @@ def train_ar_sft(
     ar_model.to(device)
     ar_model.train()
     ar_model.print_trainable_parameters()
+    logger.info("Model on GPU — loading dataset")
 
     dataset = ARDataset(
         parquet_path=Path(data_dir) / "ar_sft_train.parquet",
