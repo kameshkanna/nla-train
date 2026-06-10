@@ -70,7 +70,7 @@ LABELED_SCHEMA = pa.schema([
 ])
 
 
-def _build_embeds(
+def _build_embeds_encoded(
     activation: np.ndarray,
     tokenizer: AutoTokenizer,
     embed_weight: torch.Tensor,
@@ -79,12 +79,16 @@ def _build_embeds(
     right_neighbor_id: int,
     injection_scale: float,
     injection_char: str,
-) -> np.ndarray:
+    max_new_tokens: int,
+    temperature: float,
+) -> bytes:
     """
-    Build the input_embeds array for a single activation vector.
+    Build input_embeds, serialize to JSON bytes — all CPU work in one thread call.
 
-    Returns float32 numpy array of shape (seq_len, d_model).
-    CPU-bound — call via asyncio.to_thread to overlap with HTTP I/O.
+    Doing tolist() + orjson.dumps in the event loop (even after to_thread) blocks
+    the loop for ~20-50ms per request and starves SGLang. Keep all of it here.
+
+    Returns orjson-serialized payload bytes ready to POST.
     """
     prompt_content = AV_PROMPT_TEMPLATE.format(injection_char=injection_char)
     formatted: str = tokenizer.apply_chat_template(
@@ -123,7 +127,14 @@ def _build_embeds(
     act = act * injection_scale
     embeds[inject_pos] = act
 
-    return embeds.numpy().astype(np.float32)
+    payload = {
+        "input_embeds": embeds.numpy().astype(np.float32).tolist(),
+        "sampling_params": {
+            "temperature": temperature,
+            "max_new_tokens": max_new_tokens,
+        },
+    }
+    return orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY)
 
 
 async def _process_row(
@@ -143,16 +154,15 @@ async def _process_row(
     semaphore: asyncio.Semaphore,
 ) -> tuple[int, str]:
     """
-    Build embeds (in thread pool) then POST to SGLang (under semaphore).
+    Build + serialize embeds in thread pool, then POST to SGLang under semaphore.
 
-    Embed building runs in asyncio.to_thread so it overlaps with other tasks'
-    in-flight HTTP requests — SGLang is never starved waiting for the next payload.
-
-    Returns (row_idx, explanation_text).
+    All CPU work (tokenize, embed, tolist, orjson.dumps) happens in to_thread so
+    the event loop stays free to dispatch other HTTP requests. SGLang sees a full
+    queue instead of draining to 1-2 requests.
     """
     try:
-        embeds: np.ndarray = await asyncio.to_thread(
-            _build_embeds,
+        encoded: bytes = await asyncio.to_thread(
+            _build_embeds_encoded,
             activation,
             tokenizer,
             embed_weight,
@@ -161,19 +171,12 @@ async def _process_row(
             right_neighbor_id,
             injection_scale,
             injection_char,
+            max_new_tokens,
+            temperature,
         )
     except RuntimeError as e:
         logger.warning("embed build failed for row %d: %s", idx, e)
         return idx, ""
-
-    payload = {
-        "input_embeds": embeds.tolist(),
-        "sampling_params": {
-            "temperature": temperature,
-            "max_new_tokens": max_new_tokens,
-        },
-    }
-    encoded = orjson.dumps(payload, option=orjson.OPT_SERIALIZE_NUMPY)
 
     async with semaphore:
         try:
