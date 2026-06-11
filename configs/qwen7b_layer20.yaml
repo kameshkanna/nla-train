@@ -96,14 +96,15 @@ grpo:
   max_train_samples: 50000          # subset RL data — 50k×4 generations gives strong signal
   kl_coef: 0.01
   learning_rate: 1.41e-5
-  per_device_train_batch_size: 8    # GPU 0 = AV only; GPU 1 = vLLM+AR
-  gradient_accumulation_steps: 16   # effective batch = 128 prompts
+  per_device_train_batch_size: 16   # doubled: GPU 0 has ~6GB headroom with FA2
+  gradient_accumulation_steps: 8    # keep effective batch = 128 prompts
   num_train_epochs: 1
   bf16: true
   gradient_checkpointing: true
   save_steps: 100
   logging_steps: 5
   ar_update_every_n_steps: 10       # re-train AR every N GRPO steps
+  ar_lr: 1.0e-5                     # explicit AR optimizer lr (persistent across steps)
 
 validation:
   output_dir: "results/validation"

@@ -35,10 +35,6 @@ pip install --quiet "peft>=0.12.0" "trl>=0.11.0"
 echo "==> Installing datasets + huggingface_hub"
 pip install --quiet "datasets>=2.20.0" "huggingface_hub>=0.24.0"
 
-echo "==> Installing SGLang 0.5.10 + transformers 5.3.0"
-pip install --quiet "sglang[all]==0.5.10"
-pip install --quiet "transformers==5.3.0" "huggingface_hub>=1.5.0"
-
 echo "==> Installing this package in editable mode"
 pip install --quiet -e .
 

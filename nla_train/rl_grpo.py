@@ -107,11 +107,13 @@ class ARRewardModel:
         tokenizer: AutoTokenizer,
         device: torch.device,
         max_length: int = 256,
+        lr: float = 1e-5,
     ) -> None:
         self._ar_model = ar_model
         self._tokenizer = tokenizer
         self._device = device
         self._max_length = max_length
+        self._optimizer = torch.optim.AdamW(self._ar_model.parameters(), lr=lr)
 
     @torch.no_grad()
     def compute_rewards(
@@ -162,7 +164,6 @@ class ARRewardModel:
         completions: list[str],
         gold_activations: list[list[float]],
         n_steps: int = 1,
-        lr: float = 1e-5,
     ) -> float:
         """
         Fine-tune the AR model on the current batch of (description, activation) pairs.
@@ -174,7 +175,6 @@ class ARRewardModel:
             Mean loss for this update.
         """
         self._ar_model.train()
-        optimizer = torch.optim.AdamW(self._ar_model.parameters(), lr=lr)
         total_loss = 0.0
 
         prompts = [
@@ -202,8 +202,8 @@ class ARRewardModel:
             loss = mse_loss_normalized(preds, golds)
             loss.backward()
             total_loss += loss.item()
-            optimizer.step()
-            optimizer.zero_grad()
+            self._optimizer.step()
+            self._optimizer.zero_grad()
 
         self._ar_model.eval()
         return total_loss / n_steps
@@ -307,6 +307,7 @@ def train_rl_grpo(
         dtype=torch.bfloat16,
         device_map={"": str(av_device)},
         trust_remote_code=True,
+        attn_implementation="flash_attention_2",
     )
     av_model = PeftModel.from_pretrained(av_base, av_checkpoint, is_trainable=True)
 
@@ -317,6 +318,7 @@ def train_rl_grpo(
         dtype=torch.bfloat16,
         device_map="cpu",
         trust_remote_code=True,
+        attn_implementation="flash_attention_2",
     )
     ar_truncated = TruncatedARModel(
         base_model=ar_base,
@@ -341,6 +343,7 @@ def train_rl_grpo(
         ar_model=ar_truncated,
         tokenizer=tokenizer,
         device=ar_device,
+        lr=grpo_cfg.get("ar_lr", 1e-5),
     )
 
     step_counter: dict = {"n": 0}
@@ -396,7 +399,7 @@ def train_rl_grpo(
     _vllm_kwargs: dict = {
         "use_vllm": True,
         "vllm_mode": "colocate",          # TRL 1.5.1 API
-        "vllm_gpu_memory_utilization": 0.35,
+        "vllm_gpu_memory_utilization": 0.45,  # was 0.35 — more KV cache → faster generation
         "vllm_tensor_parallel_size": 1,
         "vllm_device": "cuda:0",           # TRL <0.18 compat (ignored on newer)
     }

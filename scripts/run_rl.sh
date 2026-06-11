@@ -20,6 +20,9 @@ echo "    AR checkpoint: $AR_CKPT"
 
 accelerate launch \
     --num_processes 1 \
+    --num_machines 1 \
+    --mixed_precision bf16 \
+    --dynamo_backend no \
     --main_process_port 29500 \
     -m nla_train.rl_grpo \
     --config "$CONFIG" \
