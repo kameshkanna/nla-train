@@ -63,8 +63,12 @@ class RLDataset(Dataset):
         tokenizer: AutoTokenizer,
         injection_char: str,
         max_prompt_length: int = 300,
+        max_samples: int | None = None,
     ) -> None:
         table = pq.read_table(parquet_path)
+        if max_samples is not None and len(table) > max_samples:
+            table = table.slice(0, max_samples)
+            logger.info("RL dataset subsampled to %d rows", max_samples)
         n = len(table)
         d = len(table.column("activation_vector")[0].as_py())
         act_col = table.column("activation_vector").combine_chunks()
@@ -354,6 +358,7 @@ def train_rl_grpo(
         parquet_path=Path(data_dir) / "rl_train.parquet",
         tokenizer=tokenizer,
         injection_char=injection_char,
+        max_samples=grpo_cfg.get("max_train_samples"),
     )
 
     output_dir = Path(grpo_cfg["output_dir"])
