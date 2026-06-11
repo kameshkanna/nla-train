@@ -277,7 +277,9 @@ def validate(
             device=device,
         )
 
-        del av_model, av_base
+        del av_model
+        if is_peft:
+            del av_base
         gc.collect()
         torch.cuda.empty_cache()
 
