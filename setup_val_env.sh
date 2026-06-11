@@ -1,8 +1,5 @@
 #!/bin/bash
-# Validation env: SGLang-compatible stack, isolated from nla-rl-env.
-#
-# nla-rl-env has vLLM 0.16.0 + torch 2.9.1 which conflicts with SGLang.
-# This env uses torch 2.5.1 (SGLang-compatible) with no vLLM.
+# Validation env: minimal HF stack, isolated from nla-rl-env (vLLM/TRL).
 #
 # Usage:
 #   bash setup_val_env.sh
@@ -24,15 +21,12 @@ source "$ENV_NAME/bin/activate"
 echo "==> Upgrading pip"
 pip install --upgrade pip --quiet
 
-echo "==> Installing torch 2.5.1 (CUDA 12.1 — SGLang compatible)"
+echo "==> Installing torch 2.5.1 (CUDA 12.1)"
 pip install --quiet \
     torch==2.5.1 \
     torchvision==0.20.1 \
     torchaudio==2.5.1 \
     --index-url https://download.pytorch.org/whl/cu121
-
-echo "==> Installing SGLang"
-pip install --quiet "sglang[all]==0.4.1"
 
 echo "==> Installing transformers + PEFT + accelerate"
 pip install --quiet \
@@ -58,11 +52,10 @@ pip install --quiet -e .
 echo ""
 echo "==> Verifying key versions:"
 python -c "
-import torch, transformers, peft, sglang
+import torch, transformers, peft
 print(f'  torch:        {torch.__version__}')
 print(f'  transformers: {transformers.__version__}')
 print(f'  peft:         {peft.__version__}')
-print(f'  sglang:       {sglang.__version__}')
 print(f'  CUDA:         {torch.cuda.is_available()}')
 "
 
