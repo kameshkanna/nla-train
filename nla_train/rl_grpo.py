@@ -353,7 +353,7 @@ def train_rl_grpo(
     _vllm_kwargs: dict = {
         "use_vllm": True,
         "vllm_mode": "colocate",          # TRL 1.5.1 API
-        "vllm_gpu_memory_utilization": 0.35,  # single-GPU: AV ~15GB + AR ~10.5GB + vLLM 35% ≈ 55GB
+        "vllm_gpu_memory_utilization": 0.45,  # AR frozen → more headroom; 45% KV cache reduces decode paging
         "vllm_tensor_parallel_size": 1,
         "vllm_device": "cuda:0",           # TRL <0.18 compat (ignored on newer)
     }
