@@ -95,8 +95,8 @@ grpo:
   max_completion_length: 150
   kl_coef: 0.01
   learning_rate: 1.41e-5
-  per_device_train_batch_size: 4    # smaller training batch leaves GPU headroom for vLLM
-  gradient_accumulation_steps: 32   # effective batch = 128 prompts
+  per_device_train_batch_size: 8    # GPU 0 = AV only; GPU 1 = vLLM+AR
+  gradient_accumulation_steps: 16   # effective batch = 128 prompts
   num_train_epochs: 1
   bf16: true
   gradient_checkpointing: true

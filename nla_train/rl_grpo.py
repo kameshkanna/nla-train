@@ -283,7 +283,12 @@ def train_rl_grpo(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    n_gpus = torch.cuda.device_count()
+    # With 2× H100: AV training on GPU 0, AR reward model on GPU 1.
+    # With 1× H100: both on GPU 0.
+    av_device = torch.device("cuda:0")
+    ar_device = torch.device("cuda:1" if n_gpus >= 2 else "cuda:0")
+    logger.info("GPUs available: %d | AV→%s | AR→%s", n_gpus, av_device, ar_device)
 
     injection_char = nla_meta["tokens"]["injection_char"]
 
@@ -292,17 +297,17 @@ def train_rl_grpo(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # ---- Load AV model (LoRA from SFT checkpoint) ----
+    # ---- Load AV model pinned to GPU 0 ----
     logger.info("Loading AV model from: %s", av_checkpoint)
     av_base = AutoModelForCausalLM.from_pretrained(
         cfg["verbalizer_model"],
         dtype=torch.bfloat16,
-        device_map="auto",
+        device_map={"": av_device},
         trust_remote_code=True,
     )
     av_model = PeftModel.from_pretrained(av_base, av_checkpoint, is_trainable=True)
 
-    # ---- Load AR model (LoRA from SFT checkpoint) ----
+    # ---- Load AR model (truncated, layers 0..target_layer) ----
     logger.info("Loading AR model from: %s", ar_checkpoint)
     ar_base = AutoModelForCausalLM.from_pretrained(
         cfg["target_model"],
@@ -319,13 +324,20 @@ def train_rl_grpo(
     gc.collect()
 
     ar_truncated = PeftModel.from_pretrained(ar_truncated, ar_checkpoint, is_trainable=True)
-    ar_truncated.to(device)
+    ar_truncated.to(ar_device)
     ar_truncated.eval()
+    # Value head is float32 from init — cast to match backbone bfloat16
+    if hasattr(ar_truncated, "base_model"):
+        _inner = ar_truncated.base_model.model
+        if hasattr(_inner, "value_head"):
+            _inner.value_head.to(dtype=torch.bfloat16)
+    elif hasattr(ar_truncated, "value_head"):
+        ar_truncated.value_head.to(dtype=torch.bfloat16)
 
     ar_reward_model = ARRewardModel(
         ar_model=ar_truncated,
         tokenizer=tokenizer,
-        device=device,
+        device=ar_device,
     )
 
     step_counter: dict = {"n": 0}
@@ -374,22 +386,34 @@ def train_rl_grpo(
         _grpo_kwargs["beta"] = grpo_cfg["kl_coef"]
     elif "kl_coef" in _grpo_params:
         _grpo_kwargs["kl_coef"] = grpo_cfg["kl_coef"]
-    # vLLM generation speedup — API varies across TRL versions:
-    #   TRL <0.18:  vllm_device="cuda:0"
-    #   TRL >=0.18: vllm_mode="colocate" (vllm_device removed)
-    # Guard every param through the inspect check so the code runs on any version.
-    _vllm_kwargs = {
-        "use_vllm": True,
-        "vllm_gpu_memory_utilization": 0.35,
-        # TRL 1.5.1 / >=0.18 API
-        "vllm_mode": "colocate",
-        "vllm_tensor_parallel_size": 1,
-        # TRL <0.18 API (kept for backwards compat — ignored on newer TRL)
-        "vllm_device": "cuda:0",
-    }
+    # vLLM generation speedup — 2-GPU layout:
+    #   GPU 0: AV training model
+    #   GPU 1: vLLM inference server (dedicated, 90% memory)
+    #   AR reward model: also on GPU 1 (small truncated model, ~8GB)
+    # 1-GPU fallback: vllm_mode="colocate" at 40% memory utilization
+    _use_dedicated_gpu = n_gpus >= 2
+    _vllm_kwargs: dict = {"use_vllm": True}
+    if _use_dedicated_gpu:
+        # TRL 1.5.1: server mode puts vLLM on a separate GPU
+        _vllm_kwargs["vllm_mode"] = "server"
+        _vllm_kwargs["vllm_server_host"] = "0.0.0.0"
+        _vllm_kwargs["vllm_gpu_memory_utilization"] = 0.90
+        _vllm_kwargs["vllm_tensor_parallel_size"] = 1
+        # Set CUDA_VISIBLE_DEVICES for vLLM subprocess via env (TRL handles this)
+    else:
+        _vllm_kwargs["vllm_mode"] = "colocate"
+        _vllm_kwargs["vllm_gpu_memory_utilization"] = 0.40
+        _vllm_kwargs["vllm_tensor_parallel_size"] = 1
+        # Legacy TRL <0.18 compat
+        _vllm_kwargs["vllm_device"] = "cuda:0"
     for k, v in _vllm_kwargs.items():
         if k in _grpo_params:
             _grpo_kwargs[k] = v
+    logger.info(
+        "vLLM mode: %s | n_gpus=%d",
+        "server(GPU1)" if _use_dedicated_gpu else "colocate(GPU0)",
+        n_gpus,
+    )
 
     grpo_training_args = GRPOConfig(**_grpo_kwargs)
 
