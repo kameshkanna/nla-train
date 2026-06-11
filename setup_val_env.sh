@@ -40,9 +40,6 @@ pip install --quiet \
     "peft==0.14.0" \
     "accelerate==1.2.1"
 
-echo "==> Installing flash-attn"
-pip install --quiet flash-attn --no-build-isolation
-
 echo "==> Installing data + util deps"
 pip install --quiet \
     "pyarrow>=21.0.0" \

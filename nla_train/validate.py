@@ -228,7 +228,6 @@ def validate(
             dtype=torch.bfloat16,
             device_map={"": str(device)},
             trust_remote_code=True,
-            attn_implementation="flash_attention_2",
         )
         av_model = PeftModel.from_pretrained(av_base, av_ckpt, is_trainable=False)
         av_model.eval()
