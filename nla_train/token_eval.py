@@ -183,6 +183,7 @@ def token_eval(
     top_k: int = 5,
     max_new_tokens: int = 100,
     min_position: int = 5,
+    focus_token: str | None = None,
 ) -> None:
     """
     Run per-token NLA evaluation on input text.
@@ -237,6 +238,16 @@ def token_eval(
     gc.collect()
     torch.cuda.empty_cache()
     logger.info("Extracted %d token activations", len(tokens))
+
+    # If focus_token set, only evaluate that single position (last occurrence)
+    if focus_token is not None:
+        matches = [i for i, t in enumerate(tokens) if focus_token in t]
+        if not matches:
+            raise ValueError(f"focus_token {focus_token!r} not found in tokens: {tokens}")
+        idx = matches[-1]
+        tokens = [tokens[idx]]
+        activations = activations[idx : idx + 1]
+        logger.info("Focus mode: evaluating only token %r at position %d", tokens[0], idx)
 
     # Load AV model
     logger.info("Loading AV model from %s", av_checkpoint)
@@ -328,6 +339,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--top-k", type=int, default=5)
     p.add_argument("--max-new-tokens", type=int, default=100)
     p.add_argument("--min-position", type=int, default=5)
+    p.add_argument("--focus-token", default=None,
+                   help="Only evaluate the last occurrence of this token string (e.g. ',')")
     return p.parse_args()
 
 
@@ -347,6 +360,7 @@ def main() -> None:
         top_k=args.top_k,
         max_new_tokens=args.max_new_tokens,
         min_position=args.min_position,
+        focus_token=args.focus_token,
     )
 
 
