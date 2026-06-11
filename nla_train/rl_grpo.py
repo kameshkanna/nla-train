@@ -113,7 +113,9 @@ class ARRewardModel:
         self._tokenizer = tokenizer
         self._device = device
         self._max_length = max_length
-        self._optimizer = torch.optim.AdamW(self._ar_model.parameters(), lr=lr)
+        # AR is frozen: SFT loss=0.0001 → reliable fixed oracle. No optimizer needed.
+        for p in self._ar_model.parameters():
+            p.requires_grad_(False)
 
     @torch.no_grad()
     def compute_rewards(
@@ -159,54 +161,8 @@ class ARRewardModel:
         per_sample_mse = ((pred_norm - gold_norm) ** 2).mean(dim=-1)
         return (-per_sample_mse).tolist()
 
-    def update(
-        self,
-        completions: list[str],
-        gold_activations: list[list[float]],
-        n_steps: int = 1,
-    ) -> float:
-        """
-        Fine-tune the AR model on the current batch of (description, activation) pairs.
-
-        Called every `ar_update_every_n_steps` GRPO steps to keep the reward model
-        from going stale.
-
-        Returns:
-            Mean loss for this update.
-        """
-        self._ar_model.train()
-        total_loss = 0.0
-
-        prompts = [
-            self._tokenizer.apply_chat_template(
-                [{"role": "user", "content": AR_PROMPT_TEMPLATE.format(explanation=c)}],
-                tokenize=False,
-                add_generation_prompt=False,
-            )
-            for c in completions
-        ]
-        enc = self._tokenizer(
-            prompts,
-            max_length=self._max_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        ).to(self._device)
-        golds = torch.tensor(gold_activations, dtype=torch.float32, device=self._device)
-
-        for _ in range(n_steps):
-            preds = self._ar_model(
-                input_ids=enc["input_ids"],
-                attention_mask=enc["attention_mask"],
-            )
-            loss = mse_loss_normalized(preds, golds)
-            loss.backward()
-            total_loss += loss.item()
-            self._optimizer.step()
-            self._optimizer.zero_grad()
-
-        self._ar_model.eval()
-        return total_loss / n_steps
+    def update(self, *args, **kwargs) -> float:
+        return 0.0
 
 
 def build_reward_fn(
@@ -420,8 +376,7 @@ def train_rl_grpo(
     trainer.train()
 
     av_model.save_pretrained(output_dir / "final_av")
-    ar_truncated.save_pretrained(output_dir / "final_ar")
-    logger.info("GRPO complete. Final models at %s", output_dir)
+    logger.info("GRPO complete. Final AV at %s/final_av", output_dir)
 
 
 def parse_args() -> argparse.Namespace:
