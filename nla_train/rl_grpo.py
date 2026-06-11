@@ -313,12 +313,12 @@ def train_rl_grpo(
 
     # ---- Load AR model (truncated, layers 0..target_layer) ----
     logger.info("Loading AR model from: %s", ar_checkpoint)
+    # No FA2 here: AR loads to CPU first (before moving to ar_device), and FA2 is CUDA-only.
     ar_base = AutoModelForCausalLM.from_pretrained(
         cfg["target_model"],
         dtype=torch.bfloat16,
         device_map="cpu",
         trust_remote_code=True,
-        attn_implementation="flash_attention_2",
     )
     ar_truncated = TruncatedARModel(
         base_model=ar_base,
