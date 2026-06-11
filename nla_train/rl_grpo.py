@@ -306,7 +306,7 @@ def train_rl_grpo(
     av_base = AutoModelForCausalLM.from_pretrained(
         cfg["verbalizer_model"],
         dtype=torch.bfloat16,
-        device_map={"": av_device},
+        device_map={"": str(av_device)},
         trust_remote_code=True,
     )
     av_model = PeftModel.from_pretrained(av_base, av_checkpoint, is_trainable=True)
@@ -391,34 +391,20 @@ def train_rl_grpo(
         _grpo_kwargs["beta"] = grpo_cfg["kl_coef"]
     elif "kl_coef" in _grpo_params:
         _grpo_kwargs["kl_coef"] = grpo_cfg["kl_coef"]
-    # vLLM generation speedup — 2-GPU layout:
-    #   GPU 0: AV training model
-    #   GPU 1: vLLM inference server (dedicated, 90% memory)
-    #   AR reward model: also on GPU 1 (small truncated model, ~8GB)
-    # 1-GPU fallback: vllm_mode="colocate" at 40% memory utilization
-    _use_dedicated_gpu = n_gpus >= 2
-    _vllm_kwargs: dict = {"use_vllm": True}
-    if _use_dedicated_gpu:
-        # TRL 1.5.1: server mode puts vLLM on a separate GPU
-        _vllm_kwargs["vllm_mode"] = "server"
-        _vllm_kwargs["vllm_server_host"] = "0.0.0.0"
-        _vllm_kwargs["vllm_gpu_memory_utilization"] = 0.90
-        _vllm_kwargs["vllm_tensor_parallel_size"] = 1
-        # Set CUDA_VISIBLE_DEVICES for vLLM subprocess via env (TRL handles this)
-    else:
-        _vllm_kwargs["vllm_mode"] = "colocate"
-        _vllm_kwargs["vllm_gpu_memory_utilization"] = 0.40
-        _vllm_kwargs["vllm_tensor_parallel_size"] = 1
-        # Legacy TRL <0.18 compat
-        _vllm_kwargs["vllm_device"] = "cuda:0"
+    # vLLM colocate on GPU 0 alongside AV training model.
+    # AV model holds ~15GB (7B bf16 + rank-32 LoRA) → 50% vLLM leaves ~24GB for activations.
+    # AR reward model runs on GPU 1 (2-GPU) or GPU 0 (1-GPU, after vLLM/AV).
+    _vllm_kwargs: dict = {
+        "use_vllm": True,
+        "vllm_mode": "colocate",          # TRL 1.5.1 API
+        "vllm_gpu_memory_utilization": 0.50,
+        "vllm_tensor_parallel_size": 1,
+        "vllm_device": "cuda:0",           # TRL <0.18 compat (ignored on newer)
+    }
     for k, v in _vllm_kwargs.items():
         if k in _grpo_params:
             _grpo_kwargs[k] = v
-    logger.info(
-        "vLLM mode: %s | n_gpus=%d",
-        "server(GPU1)" if _use_dedicated_gpu else "colocate(GPU0)",
-        n_gpus,
-    )
+    logger.info("vLLM colocate on GPU 0 | AR on %s | n_gpus=%d", ar_device, n_gpus)
 
     grpo_training_args = GRPOConfig(**_grpo_kwargs)
 
