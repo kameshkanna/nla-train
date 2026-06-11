@@ -287,11 +287,11 @@ def train_rl_grpo(
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    n_gpus = torch.cuda.device_count()
     av_device = torch.device("cuda:0")
-    # AR on GPU 1 (fast inference); training locked to GPU 0 via accelerate_config.yaml.
-    ar_device = torch.device("cuda:1" if n_gpus >= 2 else "cpu")
-    logger.info("GPUs visible: %d | AV+vLLM→cuda:0 | AR→%s", n_gpus, ar_device)
+    # Single-GPU layout: AV + vLLM colocate + AR all on cuda:0.
+    # With CUDA_VISIBLE_DEVICES=0, Trainer sees n_gpu=1 → no DataParallel wrapping.
+    ar_device = torch.device("cuda:0")
+    logger.info("Single-GPU layout: AV + vLLM + AR all on cuda:0")
 
     injection_char = nla_meta["tokens"]["injection_char"]
 
@@ -399,14 +399,14 @@ def train_rl_grpo(
     _vllm_kwargs: dict = {
         "use_vllm": True,
         "vllm_mode": "colocate",          # TRL 1.5.1 API
-        "vllm_gpu_memory_utilization": 0.45,  # was 0.35 — more KV cache → faster generation
+        "vllm_gpu_memory_utilization": 0.35,  # single-GPU: AR+AV share 80GB; 35% (~28GB) for KV cache
         "vllm_tensor_parallel_size": 1,
         "vllm_device": "cuda:0",           # TRL <0.18 compat (ignored on newer)
     }
     for k, v in _vllm_kwargs.items():
         if k in _grpo_params:
             _grpo_kwargs[k] = v
-    logger.info("vLLM colocate on GPU 0 | AR on %s | n_gpus=%d", ar_device, n_gpus)
+    logger.info("vLLM colocate on cuda:0 | AR on cuda:0 | single-GPU layout")
 
     grpo_training_args = GRPOConfig(**_grpo_kwargs)
 
