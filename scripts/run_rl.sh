@@ -11,6 +11,9 @@ AV_CKPT="${2:-checkpoints/av_sft/final}"
 AR_CKPT="${3:-checkpoints/ar_sft/final}"
 
 export PYTORCH_ALLOC_CONF=expandable_segments:True
+# Pin training + vLLM to GPU 0; prevents accelerate from wrapping in DataParallel.
+# AR reward model runs on CPU (inference-only, no grad).
+export CUDA_VISIBLE_DEVICES=0
 echo "==> RL GRPO: Joint AV + AR training"
 echo "    AV checkpoint: $AV_CKPT"
 echo "    AR checkpoint: $AR_CKPT"

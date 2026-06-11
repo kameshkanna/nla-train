@@ -288,11 +288,10 @@ def train_rl_grpo(
     np.random.seed(seed)
 
     n_gpus = torch.cuda.device_count()
-    # With 2× H100: AV training on GPU 0, AR reward model on GPU 1.
-    # With 1× H100: both on GPU 0.
     av_device = torch.device("cuda:0")
-    ar_device = torch.device("cuda:1" if n_gpus >= 2 else "cuda:0")
-    logger.info("GPUs available: %d | AV→%s | AR→%s", n_gpus, av_device, ar_device)
+    # AR is inference-only (no grad) — keep on CPU to leave all GPU memory for AV + vLLM.
+    ar_device = torch.device("cpu")
+    logger.info("GPUs visible: %d | AV→%s | AR→%s (inference-only)", n_gpus, av_device, ar_device)
 
     injection_char = nla_meta["tokens"]["injection_char"]
 
@@ -397,7 +396,7 @@ def train_rl_grpo(
     _vllm_kwargs: dict = {
         "use_vllm": True,
         "vllm_mode": "colocate",          # TRL 1.5.1 API
-        "vllm_gpu_memory_utilization": 0.50,
+        "vllm_gpu_memory_utilization": 0.35,
         "vllm_tensor_parallel_size": 1,
         "vllm_device": "cuda:0",           # TRL <0.18 compat (ignored on newer)
     }
