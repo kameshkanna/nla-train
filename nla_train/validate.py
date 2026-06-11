@@ -207,7 +207,7 @@ def validate(
     # ---- Load AR model (frozen, for reconstruction scoring) ----
     logger.info("Loading AR model from %s", ar_checkpoint)
     ar_base = AutoModelForCausalLM.from_pretrained(
-        cfg["target_model"], dtype=torch.bfloat16, device_map="cpu", trust_remote_code=True
+        cfg["target_model"], torch_dtype=torch.bfloat16, device_map="cpu", trust_remote_code=True
     )
     ar_truncated = TruncatedARModel(
         base_model=ar_base, target_layer=cfg["target_layer"], d_model=cfg["d_model"]
@@ -225,7 +225,7 @@ def validate(
         logger.info("=== Evaluating: %s ===", label)
         av_base = AutoModelForCausalLM.from_pretrained(
             cfg["verbalizer_model"],
-            dtype=torch.bfloat16,
+            torch_dtype=torch.bfloat16,
             device_map={"": str(device)},
             trust_remote_code=True,
         )
