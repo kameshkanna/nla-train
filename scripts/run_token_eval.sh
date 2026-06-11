@@ -7,9 +7,7 @@
 
 set -euo pipefail
 
-# Default: poetry planning probe — check if model plans rhyme at newline after first line.
-# The activation at '\n' after "grab it" should explain the model is planning "rabbit" rhyme.
-TEXT="${1:-A rhyming couplet: He saw a carrot and had to grab it,}"
+TEXT="${1:-Photo caption: A golden retriever puppy sitting in a field of sunflowers,}"
 AV_CKPT="${2:-checkpoints/grpo/final_av}"
 AR_CKPT="${3:-checkpoints/ar_sft/final}"
 
@@ -30,7 +28,7 @@ python -m nla_train.token_eval \
     --top-k 5
 
 echo ""
-echo "--- Pass 2: focus on last comma (planning probe) ---"
+echo "--- Pass 2: focus on last comma (planning probe — what does model plan to complete?) ---"
 python -m nla_train.token_eval \
     --config configs/qwen7b_layer20.yaml \
     --av-checkpoint "$AV_CKPT" \
@@ -38,4 +36,5 @@ python -m nla_train.token_eval \
     --nla-meta data/labeled/nla_meta_av.yaml \
     --text "$TEXT" \
     --focus-token "," \
-    --max-new-tokens 150
+    --max-new-tokens 150 \
+    --min-position 0
