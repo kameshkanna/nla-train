@@ -107,12 +107,14 @@ def _run_av(
             attention_mask=enc["attention_mask"],
             max_new_tokens=max_new_tokens,
             do_sample=False,
+            temperature=1.0,
+            top_p=1.0,
+            top_k=0,
             pad_token_id=tokenizer.eos_token_id,
         )
-        prompt_len = enc["input_ids"].shape[1]
         for i in range(B):
-            generated = out_ids[i, prompt_len:]
-            descriptions.append(tokenizer.decode(generated, skip_special_tokens=True))
+            # inputs_embeds path: generate() returns new tokens only (no prompt echo)
+            descriptions.append(tokenizer.decode(out_ids[i], skip_special_tokens=True))
 
     return descriptions
 
