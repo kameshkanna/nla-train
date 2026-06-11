@@ -289,9 +289,9 @@ def train_rl_grpo(
 
     n_gpus = torch.cuda.device_count()
     av_device = torch.device("cuda:0")
-    # AR is inference-only (no grad) — keep on CPU to leave all GPU memory for AV + vLLM.
-    ar_device = torch.device("cpu")
-    logger.info("GPUs visible: %d | AV→%s | AR→%s (inference-only)", n_gpus, av_device, ar_device)
+    # AR is inference-only — put on GPU 1 if available, otherwise CPU.
+    ar_device = torch.device("cuda:1" if n_gpus >= 2 else "cpu")
+    logger.info("GPUs visible: %d | AV+vLLM→cuda:0 | AR→%s", n_gpus, ar_device)
 
     injection_char = nla_meta["tokens"]["injection_char"]
 
