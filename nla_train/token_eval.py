@@ -303,6 +303,7 @@ def token_eval(
 
     # Sort by RMSE for summary
     ranked = sorted(results, key=lambda r: r["rmse"])
+    top_k = min(top_k, len(ranked))
 
     print("\n" + "=" * 70)
     print(f"TOKEN-LEVEL NLA EVALUATION  |  {len(tokens)} tokens  |  layer {cfg['target_layer']}")
