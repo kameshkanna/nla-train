@@ -289,7 +289,7 @@ def train_rl_grpo(
 
     n_gpus = torch.cuda.device_count()
     av_device = torch.device("cuda:0")
-    # AR is inference-only — put on GPU 1 if available, otherwise CPU.
+    # AR on GPU 1 (fast inference); training locked to GPU 0 via accelerate_config.yaml.
     ar_device = torch.device("cuda:1" if n_gpus >= 2 else "cpu")
     logger.info("GPUs visible: %d | AV+vLLM→cuda:0 | AR→%s", n_gpus, ar_device)
 

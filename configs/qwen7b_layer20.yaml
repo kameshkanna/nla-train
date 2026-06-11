@@ -96,8 +96,8 @@ grpo:
   max_train_samples: 50000          # subset RL data — 50k×4 generations gives strong signal
   kl_coef: 0.01
   learning_rate: 1.41e-5
-  per_device_train_batch_size: 16   # doubled: GPU 0 has ~6GB headroom with FA2
-  gradient_accumulation_steps: 8    # keep effective batch = 128 prompts
+  per_device_train_batch_size: 8    # GPU 0: AV + vLLM colocate at 45%; 8 keeps peak safe
+  gradient_accumulation_steps: 16   # effective batch = 128 prompts
   num_train_epochs: 1
   bf16: true
   gradient_checkpointing: true
