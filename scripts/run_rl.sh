@@ -11,9 +11,11 @@ AV_CKPT="${2:-checkpoints/av_sft/final}"
 AR_CKPT="${3:-checkpoints/ar_sft/final}"
 
 export PYTORCH_ALLOC_CONF=expandable_segments:True
-# Single GPU: Trainer sees n_gpu=1, no DataParallel. AV + vLLM colocate + AR all on cuda:0.
-# 80GB H100: AV ~15GB + AR ~10.5GB + vLLM 35% (~28GB) + grads ~5GB ≈ 58GB total.
-export CUDA_VISIBLE_DEVICES=0
+# Both GPUs visible: GPU 0 = AV + vLLM colocate, GPU 1 = AR reward model.
+# LOCAL_RANK=0 prevents HF Trainer from wrapping in nn.DataParallel (which triggers
+# ReduceAddCoalesced OOM). With LOCAL_RANK set, Trainer uses cuda:LOCAL_RANK only.
+export CUDA_VISIBLE_DEVICES=0,1
+export LOCAL_RANK=0
 echo "==> RL GRPO: Joint AV + AR training"
 echo "    AV checkpoint: $AV_CKPT"
 echo "    AR checkpoint: $AR_CKPT"
