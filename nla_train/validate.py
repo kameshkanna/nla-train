@@ -225,24 +225,54 @@ def validate(
 
     def _evaluate_av(label: str, av_ckpt: str) -> None:
         logger.info("=== Evaluating: %s ===", label)
-        av_base = AutoModelForCausalLM.from_pretrained(
-            cfg["verbalizer_model"],
-            torch_dtype=torch.bfloat16,
-            device_map={"": str(device)},
-            trust_remote_code=True,
-        )
-        av_model = PeftModel.from_pretrained(av_base, av_ckpt, is_trainable=False)
+
+        # Use checkpoint-local nla_meta.yaml if present (e.g. kitft full model),
+        # otherwise fall back to the global injection params from our nla_meta.
+        ckpt_meta_path = Path(av_ckpt) / "nla_meta.yaml"
+        if ckpt_meta_path.exists():
+            with open(ckpt_meta_path) as f:
+                ckpt_meta = yaml.safe_load(f)
+            ev_injection_char = ckpt_meta["tokens"]["injection_char"]
+            ev_injection_token_id = ckpt_meta["tokens"]["injection_token_id"]
+            ev_left_neighbor_id = ckpt_meta["tokens"]["injection_left_neighbor_id"]
+            ev_right_neighbor_id = ckpt_meta["tokens"]["injection_right_neighbor_id"]
+            ev_injection_scale = ckpt_meta["extraction"]["injection_scale"]
+            logger.info("Using nla_meta from checkpoint: %s", ckpt_meta_path)
+        else:
+            ev_injection_char = injection_char
+            ev_injection_token_id = injection_token_id
+            ev_left_neighbor_id = left_neighbor_id
+            ev_right_neighbor_id = right_neighbor_id
+            ev_injection_scale = injection_scale
+
+        # Load as full model or PEFT adapter depending on checkpoint format
+        is_peft = (Path(av_ckpt) / "adapter_config.json").exists()
+        if is_peft:
+            av_base = AutoModelForCausalLM.from_pretrained(
+                cfg["verbalizer_model"],
+                torch_dtype=torch.bfloat16,
+                device_map={"": str(device)},
+                trust_remote_code=True,
+            )
+            av_model = PeftModel.from_pretrained(av_base, av_ckpt, is_trainable=False)
+        else:
+            av_model = AutoModelForCausalLM.from_pretrained(
+                av_ckpt,
+                torch_dtype=torch.bfloat16,
+                device_map={"": str(device)},
+                trust_remote_code=True,
+            )
         av_model.eval()
 
         descriptions = _run_av(
             av_model=av_model,
             tokenizer=tokenizer,
             activations=activations,
-            injection_char=injection_char,
-            injection_token_id=injection_token_id,
-            left_neighbor_id=left_neighbor_id,
-            right_neighbor_id=right_neighbor_id,
-            injection_scale=injection_scale,
+            injection_char=ev_injection_char,
+            injection_token_id=ev_injection_token_id,
+            left_neighbor_id=ev_left_neighbor_id,
+            right_neighbor_id=ev_right_neighbor_id,
+            injection_scale=ev_injection_scale,
             max_new_tokens=cfg["grpo"]["max_completion_length"],
             device=device,
         )
