@@ -1,15 +1,26 @@
+# environments
 nla-train-env/
+nla-rl-env/
+nla-val-env/
+
+# python
 __pycache__/
 *.pyc
 *.pyo
-.DS_Store
-data/
-checkpoints/
-results/
-*.log
-logs/
 *.egg-info/
 dist/
 build/
-.ipynb_checkpoints/
+
+# data & checkpoints (large binary, not versioned)
+data/
+checkpoints/
+experiments/data/
+
+# logs & artifacts
+*.log
+logs/
 wandb/
+
+# OS
+.DS_Store
+.ipynb_checkpoints/
