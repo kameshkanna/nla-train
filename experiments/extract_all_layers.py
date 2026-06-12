@@ -44,8 +44,10 @@ logger = logging.getLogger(__name__)
 DOMAINS = {
     "fineweb": dict(path="HuggingFaceFW/fineweb", name="sample-10BT", split="train", text_col="text"),
     "wikipedia": dict(path="wikimedia/wikipedia", name="20231101.en", split="train", text_col="text"),
-    "pubmed": dict(path="pubmed-qa", name="pqa_labeled", split="train", text_col="long_answer"),
-    "github": dict(path="codeparrot/github-code", name="all-Python", split="train", text_col="code"),
+    # ccdv/pubmed-summarization is parquet-native; article = full paper body
+    "pubmed": dict(path="ccdv/pubmed-summarization", name=None, split="train", text_col="article"),
+    # iamtarun/python_code_instructions_18k_alpaca is parquet-native, ungated, real Python code
+    "github": dict(path="iamtarun/python_code_instructions_18k_alpaca", name=None, split="train", text_col="output"),
     "reddit": dict(path="sentence-transformers/reddit-title-body", name=None, split="train", text_col="body"),
 }
 
@@ -55,9 +57,9 @@ def _load_texts(domain: str, n: int, min_len: int = 100, seed: int = 42) -> list
     cfg = DOMAINS[domain]
     try:
         if cfg["name"]:
-            ds = load_dataset(cfg["path"], cfg["name"], split=cfg["split"], streaming=True, trust_remote_code=True)
+            ds = load_dataset(cfg["path"], cfg["name"], split=cfg["split"], streaming=True)
         else:
-            ds = load_dataset(cfg["path"], split=cfg["split"], streaming=True, trust_remote_code=True)
+            ds = load_dataset(cfg["path"], split=cfg["split"], streaming=True)
         ds = ds.shuffle(seed=seed, buffer_size=10_000)
         texts = []
         for item in ds:
