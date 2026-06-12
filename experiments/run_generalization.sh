@@ -28,7 +28,7 @@ DATA_DIR="experiments/data"
 RESULTS_DIR="experiments/results"
 FIGURES_DIR="experiments/figures"
 N_PER_DOMAIN=400
-AV_BATCH=8
+AV_BATCH=256
 AR_BATCH=32
 
 # Parse flags
