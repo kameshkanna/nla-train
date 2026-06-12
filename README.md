@@ -20,7 +20,7 @@ Together they form an autoencoder in natural language: `activation → descripti
 
 ## Repo Layout
 
-```
+```text
 nla-train/
 ├── configs/
 │   └── qwen7b_layer20.yaml     # all hyperparams
@@ -41,8 +41,7 @@ nla-train/
 ├── scripts/
 │   ├── run_rl.sh               # launch RL training
 │   ├── run_validation.sh       # run validation
-│   ├── run_token_eval.sh       # per-token eval
-│   └── push_to_hf.sh           # push checkpoint to HuggingFace
+│   └── run_token_eval.sh       # per-token eval
 ├── setup_rl_env.sh             # training environment
 ├── setup_val_env.sh            # inference / eval environment
 └── accelerate_config.yaml      # single-GPU accelerate config
@@ -74,7 +73,7 @@ source nla-val-env/bin/activate
 
 Stack: `torch 2.5.1 · transformers 4.47.0 · peft 0.14.0 · accelerate 1.2.1`
 
-Use for: validation, token eval, generalization experiments, pushing to HF.
+Use for: validation, token eval, generalization experiments.
 
 > vLLM 0.16.0 requires torch 2.9.1 which conflicts with transformers 4.47.0 — that is why two envs are necessary.
 
@@ -135,6 +134,7 @@ Runs both your checkpoint and the kitft reference side-by-side and reports MSE, 
 ### Per-token evaluation (planning detection)
 
 ```bash
+source nla-val-env/bin/activate
 python -m nla_train.token_eval \
     --config configs/qwen7b_layer20.yaml \
     --av-checkpoint checkpoints/grpo/final_av \
@@ -152,24 +152,13 @@ Tests whether the L20 AV transfers to all 28 layers without retraining.
 
 ```bash
 source nla-val-env/bin/activate
-
 bash experiments/run_generalization.sh \
     --av-checkpoint checkpoints/grpo/final_av \
     --ar-checkpoint checkpoints/ar_sft/final
 ```
 
 Produces 6 figures in `experiments/figures/` and full metrics in `experiments/results/`.  
-Key result: layers 10–25 all achieve Recall@10 > 0.40 with zero retraining. See the [model card](https://huggingface.co/Kameshr/nla-qwen2.5-7b-L20-av) for full writeup.
-
----
-
-## Push to HuggingFace
-
-```bash
-source nla-val-env/bin/activate
-huggingface-cli login          # needs a Write token
-bash scripts/push_to_hf.sh Kameshr/nla-qwen2.5-7b-L20-av checkpoints/grpo/final_av
-```
+Key result: layers 10–25 all achieve Recall@10 > 0.40 with zero retraining. See the [model card](https://huggingface.co/Kameshr/nla-qwen2.5-7b-L20-av) for the full writeup.
 
 ---
 
