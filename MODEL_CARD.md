@@ -98,32 +98,44 @@ The AV reads the comma and plans ahead — the description includes content not 
 
 ---
 
-## Generalization
+## Generalization Experiment
 
-Trained on layer 20, evaluated across all 28 layers (2000 texts, 5 domains):
+After training on layer 20, we asked: *does this model need to be retrained for every layer, or does it transfer?*
 
-| Layer range | Cosine Similarity | Recall@10 |
-|---|---|---|
-| L10–L14 | 0.52–0.57 | 0.40–0.55 |
-| L15–L19 | 0.60–0.67 | 0.59–0.65 |
-| **L20 (train)** | **0.692** | **0.682** |
-| L21–L25 | 0.56–0.67 | 0.42–0.67 |
-| L27 | 0.215 | 0.005 |
+We extracted activations from all 28 layers across 2000 texts and 5 domains (FineWeb, Wikipedia, PubMed, GitHub, Reddit), ran AV inference on all 56,000 (text, layer) pairs, and measured how well the descriptions reconstruct back to the original activation via the AR model.
 
-28/28 layers statistically significant vs random baseline (Wilcoxon, BH-corrected). Norm scaling has no effect — the AV learned directional, not magnitude-based, representations.
+**Finding:** Performance decays smoothly as you move away from the training layer — not a cliff, but a gradient. A single model trained on L20 covers layers 10–26 with meaningful accuracy, suggesting 2–3 strategically placed models can cover the full network instead of 28, reducing training cost by ~10× with a modest accuracy tradeoff.
 
-Full experiment: [github.com/kameshkanna/nla-train/experiments](https://github.com/kameshkanna/nla-train)
+| Layer range | Cosine Similarity | Recall@10 | Notes |
+|---|---|---|---|
+| L0–L9 | 0.30–0.46 | 0.02–0.31 | Surface features, poor transfer |
+| L10–L14 | 0.52–0.57 | 0.40–0.55 | Reasonable |
+| L15–L19 | 0.60–0.67 | 0.59–0.65 | Good |
+| **L20 (train)** | **0.692** | **0.682** | Peak |
+| L21–L25 | 0.56–0.67 | 0.42–0.67 | Good |
+| L27 | 0.215 | 0.005 | Pre-unembed geometry, fails |
+
+- **Cosine Similarity** — direction agreement between reconstructed and true activation (norm-invariant)
+- **Recall@10** — does the correct activation rank in top 10 out of 500 candidates given only the description?
+- 28/28 layers statistically significant vs random baseline (Wilcoxon signed-rank, Benjamini-Hochberg corrected)
+- Norm scaling the input activations to match layer-20 scale had zero effect — the AV learned directional representations, not magnitude-dependent ones
+
+Full experiment code and figures: [github.com/kameshkanna/nla-train/tree/main/experiments](https://github.com/kameshkanna/nla-train/tree/main/experiments)
 
 ---
 
 ## Training
 
-| Stage | Details |
-|---|---|
-| AR SFT | Truncated Qwen2.5-7B (layers 0–20), LoRA r=64, MSE loss, 1h |
-| AV SFT | Full Qwen2.5-7B, LoRA r=32, CE loss on kitft-labeled descriptions, 1.5h |
-| RL GRPO | TRL GRPOTrainer, reward = −MSE(AR(description), activation), 1250 steps, 7h |
-| Compute | 1× H100 80GB, ~$25 total |
+The original NLA pipeline requires multi-GPU Megatron and Claude API calls for labeling. We reproduced it on a single H100 with open-source components.
+
+| Stage | Details | Time |
+|---|---|---|
+| AR SFT | Truncated Qwen2.5-7B (layers 0–20 only), LoRA r=64, MSE loss | ~1h |
+| AV SFT | Full Qwen2.5-7B, LoRA r=32, CE loss, kitft AV used as label oracle (no API cost) | ~1.5h |
+| RL GRPO | TRL GRPOTrainer, reward = −MSE(AR(description), activation), 1250 steps (reduced from full run due to compute budget) | ~7h |
+| **Total** | **1× H100 80GB, Lambda Labs** | **~$35** |
+
+Key cost reductions vs original pipeline: single GPU with `CUDA_VISIBLE_DEVICES=0` to prevent DataParallel OOM, AR frozen during RL (converged to loss=0.0001 at SFT), vLLM colocate mode for 3× generation throughput, LoRA throughout instead of full fine-tune.
 
 ---
 
