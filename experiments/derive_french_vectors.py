@@ -166,8 +166,20 @@ def _extract_activations(
     layer_indices: list[int],
     batch_size: int,
     device: torch.device,
+    completion_tokens: int = 10,
 ) -> dict[int, np.ndarray]:
-    """Extract last-token activations at all target layers. Returns {layer: (N, d)}."""
+    """Generate a short completion per text, then extract the activation at the
+    first generated token position.
+
+    Both the French-mode and English-mode prompts end with the same
+    ``<|im_start|>assistant\\n`` token, so extracting from the prompt last-token
+    gives a near-zero diff. Extracting from the first *generated* token captures
+    the activations at the point where the model has already committed to a
+    language (French ``"La"``/``"Le"`` vs English ``"The"``/``"I"``).
+
+    Returns:
+        {layer_idx: np.ndarray (N, d_model)}
+    """
     hook = _LayerHook(model, layer_indices)
     out: dict[int, list[np.ndarray]] = {l: [] for l in layer_indices}
 
@@ -175,15 +187,34 @@ def _extract_activations(
         batch = texts[start : start + batch_size]
         enc = tokenizer(batch, return_tensors="pt", padding=True,
                         truncation=True, max_length=256).to(device)
+        prompt_len = enc["input_ids"].shape[1]
+
+        # Generate a short completion — we only need the first token's activation
         hook.clear()
-        model(**enc)
+        gen_ids = model.generate(
+            **enc,
+            max_new_tokens=completion_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+        # gen_ids: (B, prompt_len + completion_tokens)
+        # Re-run a full forward pass over the generated sequence to get clean hook captures
+        hook.clear()
+        full_enc = {
+            "input_ids": gen_ids,
+            "attention_mask": torch.ones_like(gen_ids),
+        }
+        model(**full_enc)
+
         for l in layer_indices:
             h = hook._captures.get(l)
             if h is not None:
-                # last non-pad token per sequence
-                seq_lens = enc["attention_mask"].sum(dim=1) - 1
+                # Capture at the position of the first new token (prompt_len)
                 for b_idx in range(len(batch)):
-                    out[l].append(h[b_idx, seq_lens[b_idx].item()].numpy())
+                    out[l].append(h[b_idx, prompt_len].float().numpy())
+
+        del gen_ids, full_enc
+        gc.collect()
 
     hook.remove()
     return {l: np.stack(v).astype(np.float32) for l, v in out.items() if v}
@@ -209,9 +240,6 @@ def derive_french_vectors(
         batch_size: Batch size for activation extraction.
     """
     out_path = Path(output_dir) / "french_vectors.npz"
-    if out_path.exists():
-        logger.info("french_vectors.npz already exists — skipping")
-        return
 
     logger.info("Using %d contrastive question pairs", len(FRENCH_PAIRS))
 
