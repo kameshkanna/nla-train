@@ -731,7 +731,9 @@ def _plot_qualitative_grid(results: list[dict], output_path: Path, layer: int = 
                     continue
 
                 key = f"{cond}_description" if cond != "baseline" else "baseline_description"
-                desc = rec.get(key, "")[:200]
+                # Strip all CJK-adjacent blocks (0x2E80–0xFAFF) that DejaVu Sans can't render.
+                # Covers the injection char ㈀ (U+3200, Enclosed CJK) and the main ideograph block.
+                desc = "".join(c for c in rec.get(key, "") if not (0x2E80 <= ord(c) <= 0xFAFF))[:200]
 
                 ax.text(0.04, 0.95, f"{behavior} | {cond}",
                         transform=ax.transAxes, fontsize=7, fontweight="bold",
