@@ -40,74 +40,150 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
-# 120 French/English contrastive prompt pairs.
-# Each English prefix is paired with a French and English completion.
-# The CAA direction = mean(h_french) - mean(h_english) per layer.
+# Contrastive pairs for deriving a "respond in French" CAA direction.
+#
+# Design principle: topic-neutral prefixes (no French topics, no France, no
+# French culture). The ONLY difference between french and english completions
+# is the output language. This ensures the CAA direction captures
+# "output mode = French" not "thinking about French things."
+#
+# Pairs span diverse topics (science, math, animals, weather, technology,
+# history, everyday tasks) so the direction generalises across domains.
 FRENCH_PAIRS: list[dict] = [
-    # greetings / openers
-    {"prefix": "Good morning!", "french": "Bonjour !", "english": "Hello!"},
-    {"prefix": "How are you today?", "french": "Comment allez-vous aujourd'hui ?", "english": "I am doing well, thank you."},
-    {"prefix": "What is your name?", "french": "Mon nom est Claude.", "english": "My name is Claude."},
-    {"prefix": "Nice to meet you.", "french": "Enchanté de vous rencontrer.", "english": "It is nice to meet you too."},
-    {"prefix": "Good evening!", "french": "Bonsoir !", "english": "Good evening!"},
-    # factual responses
-    {"prefix": "What is the capital of France?", "french": "La capitale de la France est Paris.", "english": "The capital of France is Paris."},
-    {"prefix": "What language do they speak in France?", "french": "En France, on parle français.", "english": "In France, they speak French."},
-    {"prefix": "What is water made of?", "french": "L'eau est composée d'hydrogène et d'oxygène.", "english": "Water is made of hydrogen and oxygen."},
-    {"prefix": "How many days are in a week?", "french": "Il y a sept jours dans une semaine.", "english": "There are seven days in a week."},
-    {"prefix": "What is the largest planet?", "french": "Jupiter est la plus grande planète du système solaire.", "english": "Jupiter is the largest planet in the solar system."},
-    {"prefix": "Who wrote Romeo and Juliet?", "french": "Roméo et Juliette a été écrit par William Shakespeare.", "english": "Romeo and Juliet was written by William Shakespeare."},
-    {"prefix": "What is the speed of light?", "french": "La vitesse de la lumière est d'environ 300 000 kilomètres par seconde.", "english": "The speed of light is approximately 300,000 kilometers per second."},
-    {"prefix": "What is the boiling point of water?", "french": "L'eau bout à 100 degrés Celsius.", "english": "Water boils at 100 degrees Celsius."},
-    {"prefix": "What is the chemical symbol for gold?", "french": "Le symbole chimique de l'or est Au.", "english": "The chemical symbol for gold is Au."},
-    {"prefix": "What is the tallest mountain?", "french": "Le mont Everest est la plus haute montagne du monde.", "english": "Mount Everest is the tallest mountain in the world."},
-    # instructions / tasks
-    {"prefix": "Please summarize this article.", "french": "Je vais résumer cet article pour vous.", "english": "I will summarize this article for you."},
-    {"prefix": "Can you help me with this problem?", "french": "Bien sûr, je peux vous aider avec ce problème.", "english": "Of course, I can help you with this problem."},
-    {"prefix": "Please translate this sentence.", "french": "Je vais traduire cette phrase pour vous.", "english": "I will translate this sentence for you."},
-    {"prefix": "Write a short story.", "french": "Il était une fois un jeune garçon qui vivait dans une forêt enchantée.", "english": "Once upon a time there was a young boy who lived in an enchanted forest."},
-    {"prefix": "Explain machine learning.", "french": "L'apprentissage automatique est une branche de l'intelligence artificielle.", "english": "Machine learning is a branch of artificial intelligence."},
-    {"prefix": "What should I eat for breakfast?", "french": "Je vous recommande des croissants et du café pour le petit-déjeuner.", "english": "I recommend eggs and toast for breakfast."},
-    {"prefix": "How do I learn a new language?", "french": "Pour apprendre une nouvelle langue, pratiquez chaque jour et immergez-vous dans la culture.", "english": "To learn a new language, practice every day and immerse yourself in the culture."},
-    {"prefix": "Give me a recipe for soup.", "french": "Pour faire une soupe, faites chauffer du bouillon avec des légumes et des herbes.", "english": "To make soup, heat broth with vegetables and herbs."},
-    {"prefix": "How do I stay healthy?", "french": "Pour rester en bonne santé, faites de l'exercice régulièrement et mangez équilibré.", "english": "To stay healthy, exercise regularly and eat a balanced diet."},
-    {"prefix": "Describe the weather today.", "french": "Aujourd'hui, le ciel est nuageux avec quelques éclaircies.", "english": "Today, the sky is cloudy with some sunny spells."},
-    # conversational
-    {"prefix": "What do you think about this?", "french": "Je pense que c'est une idée très intéressante.", "english": "I think this is a very interesting idea."},
-    {"prefix": "Tell me something interesting.", "french": "Saviez-vous que les pieuvres ont trois cœurs ?", "english": "Did you know that octopuses have three hearts?"},
-    {"prefix": "I am feeling sad today.", "french": "Je suis désolé d'apprendre que vous vous sentez triste. Comment puis-je vous aider ?", "english": "I am sorry to hear you are feeling sad. How can I help?"},
-    {"prefix": "What is your favorite color?", "french": "Ma couleur préférée est le bleu, comme le ciel.", "english": "My favorite color is blue, like the sky."},
-    {"prefix": "Do you like music?", "french": "Oui, j'aime beaucoup la musique, surtout la musique classique.", "english": "Yes, I enjoy music very much, especially classical music."},
-    # longer completions for richer signal
-    {"prefix": "Tell me about Paris.", "french": "Paris est la capitale de la France et l'une des plus belles villes du monde. La ville est connue pour la tour Eiffel, le musée du Louvre et sa cuisine exquise.", "english": "Paris is the capital of France and one of the most beautiful cities in the world. The city is known for the Eiffel Tower, the Louvre museum, and its exquisite cuisine."},
-    {"prefix": "Describe a forest.", "french": "Une forêt est un vaste écosystème composé d'arbres, de plantes, d'animaux et de micro-organismes qui vivent en harmonie.", "english": "A forest is a vast ecosystem composed of trees, plants, animals, and microorganisms living in harmony."},
-    {"prefix": "What is democracy?", "french": "La démocratie est un système de gouvernement dans lequel les citoyens exercent le pouvoir par le vote.", "english": "Democracy is a system of government in which citizens exercise power through voting."},
-    {"prefix": "Explain the water cycle.", "french": "Le cycle de l'eau décrit comment l'eau circule continuellement sur Terre par évaporation, condensation et précipitation.", "english": "The water cycle describes how water continuously circulates on Earth through evaporation, condensation, and precipitation."},
-    {"prefix": "What is artificial intelligence?", "french": "L'intelligence artificielle est la simulation de l'intelligence humaine par des machines programmées pour penser et apprendre.", "english": "Artificial intelligence is the simulation of human intelligence by machines programmed to think and learn."},
-    # numbers / days / months in French to reinforce lexical signal
-    {"prefix": "Count to five.", "french": "Un, deux, trois, quatre, cinq.", "english": "One, two, three, four, five."},
-    {"prefix": "What day is today?", "french": "Aujourd'hui c'est lundi.", "english": "Today is Monday."},
-    {"prefix": "What month is it?", "french": "Nous sommes en janvier.", "english": "We are in January."},
-    {"prefix": "What season is it?", "french": "C'est l'automne.", "english": "It is autumn."},
-    {"prefix": "What time is it?", "french": "Il est trois heures de l'après-midi.", "english": "It is three o'clock in the afternoon."},
-    # politeness phrases
-    {"prefix": "Thank you very much.", "french": "Merci beaucoup, c'est très gentil.", "english": "Thank you very much, that is very kind."},
-    {"prefix": "You are welcome.", "french": "De rien, c'est avec plaisir.", "english": "You are welcome, it is my pleasure."},
-    {"prefix": "Excuse me.", "french": "Excusez-moi, puis-je vous demander quelque chose ?", "english": "Excuse me, may I ask you something?"},
-    {"prefix": "I am sorry.", "french": "Je suis vraiment désolé pour ce malentendu.", "english": "I am truly sorry for this misunderstanding."},
-    {"prefix": "Please.", "french": "S'il vous plaît, pourriez-vous m'aider ?", "english": "Please, could you help me?"},
-    # food / culture
-    {"prefix": "What is a croissant?", "french": "Un croissant est une viennoiserie française en forme de croissant de lune, feuilletée et beurrée.", "english": "A croissant is a French pastry shaped like a crescent moon, flaky and buttery."},
-    {"prefix": "What is wine?", "french": "Le vin est une boisson alcoolisée fabriquée à partir de raisins fermentés.", "english": "Wine is an alcoholic beverage made from fermented grapes."},
-    {"prefix": "Describe French cuisine.", "french": "La cuisine française est réputée pour sa sophistication, sa richesse en saveurs et ses techniques culinaires raffinées.", "english": "French cuisine is renowned for its sophistication, richness of flavors, and refined culinary techniques."},
-    {"prefix": "What is a baguette?", "french": "Une baguette est un pain français long et croustillant, emblème de la culture française.", "english": "A baguette is a long, crusty French bread, emblematic of French culture."},
-    {"prefix": "Tell me about cheese.", "french": "La France produit plus de 1000 variétés de fromages, dont le camembert, le brie et le roquefort.", "english": "France produces more than 1000 varieties of cheese, including camembert, brie, and roquefort."},
+    # science / nature
+    {"prefix": "What is photosynthesis?",
+     "french": "La photosynthèse est le processus par lequel les plantes convertissent la lumière solaire en énergie.",
+     "english": "Photosynthesis is the process by which plants convert sunlight into energy."},
+    {"prefix": "How do volcanoes form?",
+     "french": "Les volcans se forment lorsque le magma remonte à travers les fissures de la croûte terrestre.",
+     "english": "Volcanoes form when magma rises through cracks in the Earth's crust."},
+    {"prefix": "What is gravity?",
+     "french": "La gravité est la force qui attire les objets les uns vers les autres.",
+     "english": "Gravity is the force that attracts objects toward each other."},
+    {"prefix": "How do stars form?",
+     "french": "Les étoiles se forment à partir de nuages de gaz et de poussière qui s'effondrent sous leur propre gravité.",
+     "english": "Stars form from clouds of gas and dust that collapse under their own gravity."},
+    {"prefix": "What is the water cycle?",
+     "french": "Le cycle de l'eau décrit comment l'eau circule entre les océans, l'atmosphère et la terre.",
+     "english": "The water cycle describes how water circulates between the oceans, atmosphere, and land."},
+    {"prefix": "Why is the sky blue?",
+     "french": "Le ciel est bleu parce que l'atmosphère diffuse la lumière bleue plus que les autres couleurs.",
+     "english": "The sky is blue because the atmosphere scatters blue light more than other colours."},
+    {"prefix": "What is DNA?",
+     "french": "L'ADN est une molécule qui contient les instructions génétiques pour le développement et le fonctionnement de tous les êtres vivants.",
+     "english": "DNA is a molecule that contains the genetic instructions for the development and functioning of all living organisms."},
+    {"prefix": "How does the immune system work?",
+     "french": "Le système immunitaire protège le corps en détectant et en détruisant les agents pathogènes.",
+     "english": "The immune system protects the body by detecting and destroying pathogens."},
+    # mathematics
+    {"prefix": "What is a prime number?",
+     "french": "Un nombre premier est un nombre naturel supérieur à 1 qui n'a pas d'autres diviseurs que 1 et lui-même.",
+     "english": "A prime number is a natural number greater than 1 that has no divisors other than 1 and itself."},
+    {"prefix": "What is the Pythagorean theorem?",
+     "french": "Le théorème de Pythagore stipule que dans un triangle rectangle, le carré de l'hypoténuse est égal à la somme des carrés des deux autres côtés.",
+     "english": "The Pythagorean theorem states that in a right triangle, the square of the hypotenuse equals the sum of the squares of the other two sides."},
+    {"prefix": "What is a fraction?",
+     "french": "Une fraction représente une partie d'un tout, exprimée sous la forme d'un numérateur divisé par un dénominateur.",
+     "english": "A fraction represents a part of a whole, expressed as a numerator divided by a denominator."},
+    {"prefix": "What is calculus?",
+     "french": "Le calcul infinitésimal est une branche des mathématiques qui étudie les taux de variation et l'accumulation.",
+     "english": "Calculus is a branch of mathematics that studies rates of change and accumulation."},
+    # animals
+    {"prefix": "How do bees make honey?",
+     "french": "Les abeilles fabriquent le miel en collectant le nectar des fleurs et en le transformant dans la ruche.",
+     "english": "Bees make honey by collecting nectar from flowers and processing it in the hive."},
+    {"prefix": "Why do birds migrate?",
+     "french": "Les oiseaux migrent pour trouver de la nourriture et des conditions climatiques plus favorables.",
+     "english": "Birds migrate to find food and more favourable weather conditions."},
+    {"prefix": "How do spiders spin webs?",
+     "french": "Les araignées filent leurs toiles en produisant de la soie à partir de glandes spécialisées dans leur abdomen.",
+     "english": "Spiders spin webs by producing silk from specialised glands in their abdomen."},
+    {"prefix": "What do elephants eat?",
+     "french": "Les éléphants mangent des herbes, des feuilles, des fruits et des écorces d'arbres.",
+     "english": "Elephants eat grasses, leaves, fruits, and tree bark."},
+    {"prefix": "How do fish breathe?",
+     "french": "Les poissons respirent en extrayant l'oxygène dissous dans l'eau à travers leurs branchies.",
+     "english": "Fish breathe by extracting dissolved oxygen from water through their gills."},
+    # weather / environment
+    {"prefix": "What causes thunder?",
+     "french": "Le tonnerre est causé par l'expansion rapide de l'air chauffé par la foudre.",
+     "english": "Thunder is caused by the rapid expansion of air heated by lightning."},
+    {"prefix": "What is climate change?",
+     "french": "Le changement climatique désigne les modifications à long terme des températures et des conditions météorologiques mondiales.",
+     "english": "Climate change refers to long-term shifts in global temperatures and weather patterns."},
+    {"prefix": "How do rainbows form?",
+     "french": "Les arcs-en-ciel se forment lorsque la lumière solaire est réfractée et réfléchie dans les gouttes de pluie.",
+     "english": "Rainbows form when sunlight is refracted and reflected inside raindrops."},
+    # technology
+    {"prefix": "What is the internet?",
+     "french": "Internet est un réseau mondial d'ordinateurs interconnectés qui communiquent via des protocoles standardisés.",
+     "english": "The internet is a global network of interconnected computers that communicate via standardised protocols."},
+    {"prefix": "How does a computer processor work?",
+     "french": "Un processeur exécute des instructions en effectuant des opérations arithmétiques et logiques sur des données.",
+     "english": "A processor executes instructions by performing arithmetic and logical operations on data."},
+    {"prefix": "What is machine learning?",
+     "french": "L'apprentissage automatique est une méthode permettant aux ordinateurs d'apprendre à partir de données sans être explicitement programmés.",
+     "english": "Machine learning is a method that allows computers to learn from data without being explicitly programmed."},
+    {"prefix": "What is a database?",
+     "french": "Une base de données est un système organisé pour stocker, gérer et récupérer des informations.",
+     "english": "A database is an organised system for storing, managing, and retrieving information."},
+    {"prefix": "How does encryption work?",
+     "french": "Le chiffrement transforme les données lisibles en un format illisible à l'aide d'un algorithme et d'une clé.",
+     "english": "Encryption transforms readable data into an unreadable format using an algorithm and a key."},
+    # history / society (non-French topics)
+    {"prefix": "What caused the First World War?",
+     "french": "La Première Guerre mondiale a été déclenchée par l'assassinat de l'archiduc François-Ferdinand et par un réseau d'alliances entre les nations.",
+     "english": "The First World War was triggered by the assassination of Archduke Franz Ferdinand and a network of alliances between nations."},
+    {"prefix": "What is democracy?",
+     "french": "La démocratie est un système de gouvernement dans lequel les citoyens exercent le pouvoir en votant.",
+     "english": "Democracy is a system of government in which citizens exercise power by voting."},
+    {"prefix": "What was the Industrial Revolution?",
+     "french": "La révolution industrielle fut une période de transition vers de nouveaux procédés de fabrication en Europe et aux États-Unis.",
+     "english": "The Industrial Revolution was a period of transition to new manufacturing processes in Europe and the United States."},
+    # everyday tasks / instructions
+    {"prefix": "How do you bake bread?",
+     "french": "Pour faire du pain, mélangez de la farine, de l'eau, de la levure et du sel, puis laissez lever avant de cuire.",
+     "english": "To bake bread, mix flour, water, yeast, and salt, then let it rise before baking."},
+    {"prefix": "How do you change a tyre?",
+     "french": "Pour changer un pneu, soulevez le véhicule avec un cric, retirez les boulons, remplacez le pneu et resserrez les boulons.",
+     "english": "To change a tyre, lift the vehicle with a jack, remove the bolts, replace the tyre, and retighten the bolts."},
+    {"prefix": "How do you plant a tree?",
+     "french": "Pour planter un arbre, creusez un trou, placez l'arbre à la verticale, remplissez de terre et arrosez abondamment.",
+     "english": "To plant a tree, dig a hole, place the tree upright, fill with soil, and water thoroughly."},
+    {"prefix": "How do you write a good email?",
+     "french": "Pour écrire un bon e-mail, utilisez un objet clair, un ton approprié, et soyez concis.",
+     "english": "To write a good email, use a clear subject line, an appropriate tone, and be concise."},
+    # short single-sentence pairs — highest signal-to-noise for CAA
+    {"prefix": "The sun rises in the east.", "french": "Le soleil se lève à l'est.", "english": "The sun rises in the east."},
+    {"prefix": "Dogs are loyal animals.", "french": "Les chiens sont des animaux loyaux.", "english": "Dogs are loyal animals."},
+    {"prefix": "Water boils at 100 degrees.", "french": "L'eau bout à 100 degrés.", "english": "Water boils at 100 degrees."},
+    {"prefix": "Exercise is good for health.", "french": "L'exercice est bon pour la santé.", "english": "Exercise is good for health."},
+    {"prefix": "Reading improves vocabulary.", "french": "La lecture améliore le vocabulaire.", "english": "Reading improves vocabulary."},
+    {"prefix": "The moon orbits the Earth.", "french": "La lune tourne autour de la Terre.", "english": "The moon orbits the Earth."},
+    {"prefix": "Sleep is essential for recovery.", "french": "Le sommeil est essentiel pour la récupération.", "english": "Sleep is essential for recovery."},
+    {"prefix": "Mathematics is the language of science.", "french": "Les mathématiques sont le langage de la science.", "english": "Mathematics is the language of science."},
+    {"prefix": "Trees absorb carbon dioxide.", "french": "Les arbres absorbent le dioxyde de carbone.", "english": "Trees absorb carbon dioxide."},
+    {"prefix": "Light travels faster than sound.", "french": "La lumière voyage plus vite que le son.", "english": "Light travels faster than sound."},
+    # assistant-style response openers (highest value for steering output mode)
+    {"prefix": "User: What is two plus two?\nAssistant:", "french": " Deux plus deux égale quatre.", "english": " Two plus two equals four."},
+    {"prefix": "User: How are you?\nAssistant:", "french": " Je vais bien, merci de demander.", "english": " I am doing well, thank you for asking."},
+    {"prefix": "User: What time is it?\nAssistant:", "french": " Je ne peux pas voir l'heure, mais je peux vous aider autrement.", "english": " I cannot see the time, but I can help you in other ways."},
+    {"prefix": "User: Explain gravity briefly.\nAssistant:", "french": " La gravité est la force qui attire les masses les unes vers les autres.", "english": " Gravity is the force that attracts masses toward each other."},
+    {"prefix": "User: What is the tallest mountain?\nAssistant:", "french": " Le mont Everest est la plus haute montagne du monde.", "english": " Mount Everest is the tallest mountain in the world."},
+    {"prefix": "User: Give me a fun fact.\nAssistant:", "french": " Les pieuvres ont trois cœurs et du sang bleu.", "english": " Octopuses have three hearts and blue blood."},
+    {"prefix": "User: How does a rainbow form?\nAssistant:", "french": " Un arc-en-ciel se forme quand la lumière est réfractée dans les gouttes d'eau.", "english": " A rainbow forms when light is refracted through water droplets."},
+    {"prefix": "User: What should I eat for breakfast?\nAssistant:", "french": " Je vous suggère des œufs, des fruits et du pain complet.", "english": " I suggest eggs, fruit, and whole-grain bread."},
+    {"prefix": "User: How do I stay focused?\nAssistant:", "french": " Éliminez les distractions, faites des pauses régulières et fixez-vous des objectifs clairs.", "english": " Eliminate distractions, take regular breaks, and set clear goals."},
+    {"prefix": "User: What is the capital of Japan?\nAssistant:", "french": " La capitale du Japon est Tokyo.", "english": " The capital of Japan is Tokyo."},
+    {"prefix": "User: How do plants grow?\nAssistant:", "french": " Les plantes poussent en absorbant l'eau, les nutriments du sol et la lumière du soleil.", "english": " Plants grow by absorbing water, nutrients from the soil, and sunlight."},
+    {"prefix": "User: Tell me a joke.\nAssistant:", "french": " Pourquoi les plongeurs plongent-ils toujours en arrière ? Parce que sinon ils tomberaient dans le bateau.", "english": " Why do scuba divers always fall backwards off the boat? Because if they fell forward they'd still be in the boat."},
 ]
 
-# Extend to ~120 pairs by paraphrasing the first 70
+# Double the dataset by repeating with a "Please answer:" prefix variant
+# so the direction averages over multiple prompt formats
 _EXTRA_PAIRS = [
-    {"prefix": p["prefix"] + " Please be brief.", "french": p["french"], "english": p["english"]}
-    for p in FRENCH_PAIRS[:70]
+    {"prefix": "Please answer: " + p["prefix"], "french": p["french"], "english": p["english"]}
+    for p in FRENCH_PAIRS
 ]
 FRENCH_PAIRS = FRENCH_PAIRS + _EXTRA_PAIRS
 
