@@ -181,16 +181,86 @@ def _build_layer_configs(
 
 
 @torch.no_grad()
-def _verbalize(
+def _batch_forward(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    texts: list[str],
+    probe_layers: list[int],
+    device: torch.device,
+    base_batch_size: int = 8,
+    top_k: int = 10,
+) -> tuple[dict[int, np.ndarray], list[list[tuple[str, float]]]]:
+    """Single batched forward pass over all texts, capturing all probe layers + next-token logits.
+
+    Returns:
+        acts:        {layer_idx: np.ndarray (N, d_model)}  — last-real-token activation per text
+        next_tokens: list of N top-k [(token_str, prob), ...] lists
+    """
+    tokenizer.padding_side = "left"
+    all_acts: dict[int, list[np.ndarray]] = {l: [] for l in probe_layers}
+    all_next: list[list[tuple[str, float]]] = []
+
+    for start in range(0, len(texts), base_batch_size):
+        batch = texts[start : start + base_batch_size]
+        enc = tokenizer(batch, return_tensors="pt", padding=True,
+                        truncation=True, max_length=512).to(device)
+        seq_lens = enc["attention_mask"].sum(dim=1) - 1  # (B,) index of last real token
+
+        captured: dict[int, torch.Tensor] = {}
+        handles = []
+        for l in probe_layers:
+            def _make(li: int):
+                def _hook(mod, inp, out):
+                    h = out[0] if isinstance(out, tuple) else out
+                    captured[li] = h.detach().float().cpu()
+                return _hook
+            handles.append(model.model.layers[l].register_forward_hook(_make(l)))
+
+        try:
+            out = model(**enc)
+        finally:
+            for h in handles:
+                h.remove()
+
+        # next-token top-k from logits
+        for b in range(len(batch)):
+            last_logits = out.logits[b, seq_lens[b].item(), :].float()
+            probs = torch.softmax(last_logits, dim=-1)
+            top_probs, top_ids = probs.topk(top_k)
+            all_next.append([
+                (tokenizer.decode([int(tid)]), float(p))
+                for tid, p in zip(top_ids.cpu(), top_probs.cpu())
+            ])
+
+        # activations — last real token per sequence
+        for l in probe_layers:
+            h = captured[l]  # (B, seq_len, d)
+            for b in range(len(batch)):
+                all_acts[l].append(h[b, seq_lens[b].item()].numpy())
+
+        del out, enc, captured
+        gc.collect()
+
+    return {l: np.stack(v) for l, v in all_acts.items()}, all_next
+
+
+@torch.no_grad()
+def _verbalize_batch(
     av_model: PeftModel,
     tokenizer: AutoTokenizer,
-    activation: np.ndarray,
+    activations: np.ndarray,
     injection_token_id: int,
     nla_meta: dict,
     max_new_tokens: int,
     device: torch.device,
-) -> str:
-    """Run AV on a single activation vector, return description."""
+    av_batch_size: int = 16,
+) -> list[str]:
+    """Batch AV verbalize for N activations. Returns N description strings.
+
+    Args:
+        activations: (N, d_model) float32 array — one activation per text.
+        av_batch_size: Max samples per generate call (tune to fill GPU memory).
+    """
     from nla_train.injection import AV_PROMPT_TEMPLATE, inject_at_marked_positions
 
     injection_char = nla_meta["tokens"]["injection_char"]
@@ -199,81 +269,45 @@ def _verbalize(
         tokenize=False,
         add_generation_prompt=True,
     )
-    enc = tokenizer(prompt_str, return_tensors="pt").to(device)
-    embed_layer = av_model.get_input_embeddings()
-    embeds = embed_layer(enc["input_ids"]).clone()
-    act_tensor = torch.tensor(activation, dtype=embeds.dtype, device=device).unsqueeze(0)
-    embeds = inject_at_marked_positions(
-        input_ids=enc["input_ids"],
-        embeddings=embeds,
-        activation_vectors=act_tensor,
-        injection_token_id=injection_token_id,
-        left_neighbor_id=nla_meta["tokens"]["injection_left_neighbor_id"],
-        right_neighbor_id=nla_meta["tokens"]["injection_right_neighbor_id"],
-        injection_scale=nla_meta["extraction"]["injection_scale"],
-    )
-    out_ids = av_model.generate(
-        inputs_embeds=embeds,
-        attention_mask=enc["attention_mask"],
-        max_new_tokens=max_new_tokens,
-        do_sample=False,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-    return tokenizer.decode(out_ids[0], skip_special_tokens=True)
+    enc_single = tokenizer(prompt_str, return_tensors="pt")
+    input_ids_1 = enc_single["input_ids"]  # (1, seq_len)
+    seq_len = input_ids_1.shape[1]
 
+    descriptions: list[str] = []
+    for start in range(0, len(activations), av_batch_size):
+        batch_acts = activations[start : start + av_batch_size]
+        B = len(batch_acts)
 
-def _capture_activation(
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
-    text: str,
-    layer: int,
-    device: torch.device,
-) -> np.ndarray:
-    """Forward pass + last-token activation at one layer."""
-    enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(device)
-    captured = {}
+        input_ids_b = input_ids_1.expand(B, -1).to(device)
+        embed_layer = av_model.get_input_embeddings()
+        embeds = embed_layer(input_ids_b).clone()  # (B, seq_len, d)
 
-    def hook(mod, inp, out):
-        h = out[0] if isinstance(out, tuple) else out
-        captured["h"] = h.detach().float().cpu()
-        raise StopIteration
+        act_tensor = torch.tensor(batch_acts, dtype=embeds.dtype, device=device)  # (B, d)
+        embeds = inject_at_marked_positions(
+            input_ids=input_ids_b,
+            embeddings=embeds,
+            activation_vectors=act_tensor,
+            injection_token_id=injection_token_id,
+            left_neighbor_id=nla_meta["tokens"]["injection_left_neighbor_id"],
+            right_neighbor_id=nla_meta["tokens"]["injection_right_neighbor_id"],
+            injection_scale=nla_meta["extraction"]["injection_scale"],
+        )
+        attn_mask = torch.ones(B, seq_len, dtype=torch.long, device=device)
 
-    handle = model.model.layers[layer].register_forward_hook(hook)
-    try:
-        model(**enc)
-    except StopIteration:
-        pass
-    finally:
-        handle.remove()
+        out_ids = av_model.generate(
+            inputs_embeds=embeds,
+            attention_mask=attn_mask,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+        for ids in out_ids:
+            descriptions.append(tokenizer.decode(ids, skip_special_tokens=True))
 
-    return captured["h"][0, -1].numpy()
+        del embeds, out_ids, act_tensor
+        gc.collect()
 
-
-@torch.no_grad()
-def _next_token_logits(
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
-    text: str,
-    device: torch.device,
-    top_k: int = 10,
-) -> list[tuple[str, float]]:
-    """Full forward pass → top-k next-token predictions for the given text.
-
-    Args:
-        top_k: Number of top tokens to return.
-
-    Returns:
-        List of (token_str, probability) sorted descending by probability.
-    """
-    enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(device)
-    out = model(**enc)
-    last_logits = out.logits[0, -1, :].float()
-    probs = torch.softmax(last_logits, dim=-1)
-    top_probs, top_ids = probs.topk(top_k)
-    return [
-        (tokenizer.decode([int(tid)]), float(p))
-        for tid, p in zip(top_ids.cpu(), top_probs.cpu())
-    ]
+    return descriptions
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
@@ -309,6 +343,8 @@ def run_steering_eval(
     k_scale: float = 1.0,
     max_new_tokens: int = 80,
     probe_layers: list[int] | None = None,
+    base_batch_size: int = 8,
+    av_batch_size: int = 16,
 ) -> None:
     """
     Run the full steering × AV evaluation.
@@ -381,20 +417,73 @@ def run_steering_eval(
 
     steerer = ActivationSteerer(base_model)
     all_results: list[dict[str, Any]] = []
+    texts_all = [t for t, _ in EVAL_TEXTS]
+    categories_all = [c for _, c in EVAL_TEXTS]
 
-    total = sum(len(CATEGORY_BEHAVIORS[cat]) for _, cat in EVAL_TEXTS) * len(layers)
-    pbar = tqdm(total=total, desc="steering eval")
+    # ── Step 1: baseline pass over all texts ──────────────────────────────────
+    logger.info("Baseline forward pass (%d texts, %d layers)", len(texts_all), len(layers))
+    baseline_acts, baseline_next = _batch_forward(
+        base_model, tokenizer, texts_all, layers, device,
+        base_batch_size=base_batch_size,
+    )
+    # baseline_acts: {layer: (N, d)},  baseline_next: list[N]
 
+    # AV descriptions for each layer — batch all N texts at once
+    baseline_descs: dict[int, list[str]] = {}
+    for layer in tqdm(layers, desc="AV baseline"):
+        baseline_descs[layer] = _verbalize_batch(
+            av_model, tokenizer, baseline_acts[layer],
+            injection_token_id, nla_meta, max_new_tokens, device,
+            av_batch_size=av_batch_size,
+        )
+
+    # ── Step 2: steered passes, one per (behavior, inject_mode) ───────────────
+    conditions = [("broadcast", b) for b in ["safety", "french"]] + \
+                 [("last_token", b) for b in ["safety", "french"]]
+
+    steered_data: dict[tuple[str, str], tuple[dict[int, np.ndarray], list]] = {}
+
+    for inject_mode, behavior in tqdm(conditions, desc="steered passes"):
+        mean_dirs, k_vals, layer_idxs = behavior_vectors[behavior]
+        layer_configs = _build_layer_configs(
+            mean_dirs, k_vals, layer_idxs, layers, k_scale, inject_mode
+        )
+        # Only forward-pass texts relevant to this behavior
+        relevant_idx = [i for i, c in enumerate(categories_all)
+                        if behavior in CATEGORY_BEHAVIORS[c]]
+        relevant_texts = [texts_all[i] for i in relevant_idx]
+
+        with steerer.steer(layer_configs):
+            s_acts, s_next = _batch_forward(
+                base_model, tokenizer, relevant_texts, layers, device,
+                base_batch_size=base_batch_size,
+            )
+        steered_data[(inject_mode, behavior)] = (s_acts, s_next, relevant_idx)
+
+    # AV descriptions for steered activations
+    steered_descs: dict[tuple[str, str, int], list[str]] = {}
+    for (inject_mode, behavior), (s_acts, s_next, relevant_idx) in tqdm(
+        steered_data.items(), desc="AV steered"
+    ):
+        for layer in layers:
+            descs = _verbalize_batch(
+                av_model, tokenizer, s_acts[layer],
+                injection_token_id, nla_meta, max_new_tokens, device,
+                av_batch_size=av_batch_size,
+            )
+            steered_descs[(inject_mode, behavior, layer)] = descs
+
+    # ── Step 3: assemble records ───────────────────────────────────────────────
     for text_idx, (text, category) in enumerate(EVAL_TEXTS):
-        behaviors_for_text = CATEGORY_BEHAVIORS[category]
-
-        # baseline next-token prediction (once per text, shared across behaviors)
-        baseline_next_tokens = _next_token_logits(base_model, tokenizer, text, device, top_k=10)
-
-        for behavior in behaviors_for_text:
-            mean_dirs, k_vals, layer_idxs = behavior_vectors[behavior]
+        for behavior in CATEGORY_BEHAVIORS[category]:
+            _, _, relevant_idx = steered_data[("broadcast", behavior)]
+            local_i = relevant_idx.index(text_idx)
 
             for layer in layers:
+                b_act = baseline_acts[layer][text_idx]
+                b_desc = baseline_descs[layer][text_idx]
+                b_next = baseline_next[text_idx]
+
                 record: dict[str, Any] = {
                     "text_idx": text_idx,
                     "category": category,
@@ -402,42 +491,23 @@ def run_steering_eval(
                     "layer": layer,
                     "behavior": behavior,
                     "k_scale": k_scale,
-                    "baseline_next_tokens": baseline_next_tokens,
+                    "baseline_description": b_desc,
+                    "baseline_detects_concept": _detect_concept(b_desc, behavior),
+                    "baseline_next_tokens": b_next,
                 }
 
-                baseline_act = _capture_activation(base_model, tokenizer, text, layer, device)
-                baseline_desc = _verbalize(av_model, tokenizer, baseline_act,
-                                           injection_token_id, nla_meta, max_new_tokens, device)
-                record["baseline_description"] = baseline_desc
-                record["baseline_detects_concept"] = _detect_concept(baseline_desc, behavior)
-
                 for inject_mode in ["broadcast", "last_token"]:
-                    layer_configs = _build_layer_configs(
-                        mean_dirs, k_vals, layer_idxs, layers, k_scale, inject_mode
-                    )
-                    with steerer.steer(layer_configs):
-                        steered_act = _capture_activation(base_model, tokenizer, text, layer, device)
-                        steered_next = _next_token_logits(
-                            base_model, tokenizer, text, device, top_k=10
-                        )
+                    s_acts_m, s_next_m, _ = steered_data[(inject_mode, behavior)]
+                    s_act = s_acts_m[layer][local_i]
+                    s_desc = steered_descs[(inject_mode, behavior, layer)][local_i]
+                    s_next = s_next_m[local_i]
 
-                    steered_desc = _verbalize(av_model, tokenizer, steered_act,
-                                              injection_token_id, nla_meta, max_new_tokens, device)
-                    cs = _cosine(steered_act, baseline_act)
-                    detects = _detect_concept(steered_desc, behavior)
-
-                    record[f"{inject_mode}_description"] = steered_desc
-                    record[f"{inject_mode}_cosine_vs_baseline"] = cs
-                    record[f"{inject_mode}_detects_concept"] = detects
-                    record[f"{inject_mode}_next_tokens"] = steered_next
+                    record[f"{inject_mode}_description"] = s_desc
+                    record[f"{inject_mode}_cosine_vs_baseline"] = _cosine(s_act, b_act)
+                    record[f"{inject_mode}_detects_concept"] = _detect_concept(s_desc, behavior)
+                    record[f"{inject_mode}_next_tokens"] = s_next
 
                 all_results.append(record)
-                pbar.update(1)
-
-        if text_idx % 4 == 0:
-            gc.collect()
-
-    pbar.close()
 
     # Save JSON
     result_path = out_dir / "steering_eval.json"
@@ -680,9 +750,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--k-scale", type=float, default=1.0,
                    help="Multiplier on calibrated K values (0.5=conservative, 2.0=strong)")
     p.add_argument("--probe-layers", type=int, nargs="+", default=None,
-                   help="Layers to probe (default: 18 19 20 21 22). Pass a single layer "
-                        "e.g. --probe-layers 20 for a fast single-layer run.")
+                   help="Layers to probe (default: 18 19 20 21 22). "
+                        "Pass a single layer e.g. --probe-layers 20 for fast debug.")
     p.add_argument("--max-new-tokens", type=int, default=80)
+    p.add_argument("--base-batch-size", type=int, default=8,
+                   help="Batch size for base model forward passes (increase if GPU memory allows)")
+    p.add_argument("--av-batch-size", type=int, default=16,
+                   help="Batch size for AV generate calls")
     return p.parse_args()
 
 
@@ -699,6 +773,8 @@ def main() -> None:
         k_scale=args.k_scale,
         max_new_tokens=args.max_new_tokens,
         probe_layers=args.probe_layers,
+        base_batch_size=args.base_batch_size,
+        av_batch_size=args.av_batch_size,
     )
 
 
