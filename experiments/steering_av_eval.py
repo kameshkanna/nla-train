@@ -509,17 +509,21 @@ def run_steering_eval(
 
                 all_results.append(record)
 
-    # Save JSON
-    result_path = out_dir / "steering_eval.json"
+    # Version tag encodes k_scale + layers so runs never overwrite each other
+    layer_tag = "-".join(str(l) for l in layers)
+    k_tag = f"k{k_scale:.2f}".rstrip("0").rstrip(".")
+    run_tag = f"{k_tag}_L{layer_tag}"
+
+    result_path = out_dir / f"steering_eval_{run_tag}.json"
     with open(result_path, "w") as f:
         json.dump(all_results, f, indent=2)
     logger.info("Saved %d records → %s", len(all_results), result_path)
 
     # ---- Figures ----
-    _plot_cosine_shift(all_results, fig_dir / "steering_eval_cosine_shift.png", layers)
-    _plot_detection_rate(all_results, fig_dir / "steering_eval_detection_rate.png", layers)
-    _plot_next_token_shift(all_results, fig_dir / "steering_eval_next_tokens.png")
-    _plot_qualitative_grid(all_results, fig_dir / "steering_eval_qualitative.png",
+    _plot_cosine_shift(all_results, fig_dir / f"steering_eval_cosine_shift_{run_tag}.png", layers)
+    _plot_detection_rate(all_results, fig_dir / f"steering_eval_detection_rate_{run_tag}.png", layers)
+    _plot_next_token_shift(all_results, fig_dir / f"steering_eval_next_tokens_{run_tag}.png")
+    _plot_qualitative_grid(all_results, fig_dir / f"steering_eval_qualitative_{run_tag}.png",
                            layer=layers[len(layers) // 2])
 
     del base_model, av_model, av_base
