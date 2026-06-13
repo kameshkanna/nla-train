@@ -16,6 +16,10 @@ data/
 checkpoints/
 experiments/data/
 
+# jupyter checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
 # logs & artifacts
 *.log
 logs/
