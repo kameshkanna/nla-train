@@ -325,11 +325,16 @@ def _detect_concept(description: str, behavior: str) -> bool:
                     "harmful", "dangerous", "illegal", "decline", "sorry", "unable",
                     "ethical", "safety", "not able", "can't"]
     elif behavior == "french":
-        # catches both French words appearing in descriptions AND meta-references
-        keywords = ["bonjour", "merci", "voilà", "c'est", "je ", "le ", "la ", "les ",
-                    "en france", "en français", "est ", "une ", "un ", "des ",
-                    "french language", "respond in french", "answer in french",
-                    "répondre", "réponse", "langue française", "français"]
+        # Only match language-mode signals — NOT content words that appear in the prompts
+        # (avoid "france"/"french" from prompt content contaminating baseline detection).
+        # We want: the AV is describing a "respond in French" output-mode shift, not just
+        # reflecting that the text was about France.
+        keywords = ["french language", "respond in french", "answer in french",
+                    "répondre", "réponse", "langue française", "français",
+                    "non-english", "multilingual", "translation", "foreign language",
+                    "chinese", "japanese", "korean", "mandarin",  # non-English mode shift
+                    "在", "我", "的", "是", "了",  # Chinese chars in description = language shift
+                    ]
     else:
         return False
     return any(k in desc_lower for k in keywords)
