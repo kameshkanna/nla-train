@@ -674,7 +674,15 @@ def _plot_next_token_shift(results: list[dict], output_path: Path,
                     top_tokens = rec.get(f"{cond}_next_tokens", [])
 
                 top5 = top_tokens[:5]
-                tokens = [t.replace("\n", "↵").replace(" ", "·") for t, _ in top5]
+                def _safe_token(t: str) -> str:
+                    out = []
+                    for ch in t.replace("\n", "↵").replace(" ", "·"):
+                        if 0x2E80 <= ord(ch) <= 0xFAFF:
+                            out.append(f"[{ord(ch):04X}]")
+                        else:
+                            out.append(ch)
+                    return "".join(out)
+                tokens = [_safe_token(t) for t, _ in top5]
                 probs = [p for _, p in top5]
 
                 bars = ax.barh(range(len(tokens)), probs, color=cond_colors[cond],
