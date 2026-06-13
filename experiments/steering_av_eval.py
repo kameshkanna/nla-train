@@ -417,7 +417,18 @@ def run_steering_eval(
 
     steerer = ActivationSteerer(base_model)
     all_results: list[dict[str, Any]] = []
-    texts_all = [t for t, _ in EVAL_TEXTS]
+
+    # Wrap every eval text in the chat template so the model is positioned
+    # at the generation token — next predicted token is the first response word,
+    # not "Assistant" or a newline from the chat format wrapper.
+    def _to_chat(text: str) -> str:
+        return tokenizer.apply_chat_template(
+            [{"role": "user", "content": text}],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+    texts_all = [_to_chat(t) for t, _ in EVAL_TEXTS]
     categories_all = [c for _, c in EVAL_TEXTS]
 
     # ── Step 1: baseline pass over all texts ──────────────────────────────────
