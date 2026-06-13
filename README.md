@@ -162,6 +162,51 @@ Key result: layers 10–25 all achieve Recall@10 > 0.40 with zero retraining. Se
 
 ---
 
+## Steering × AV Evaluation
+
+Tests whether the AV can detect what a steering vector is doing to the residual stream.
+Compares three conditions at layers 18–22: baseline (clean), broadcast injection, and
+last-token injection. Two behaviors: safety vectors (from [actbak](https://github.com/kameshkanna/activation-baking))
+and French-language CAA vectors derived from 120 contrastive pairs.
+
+### Step 1 — Derive French vectors
+
+```bash
+source nla-val-env/bin/activate
+python experiments/derive_french_vectors.py \
+    --model Qwen/Qwen2.5-7B-Instruct \
+    --norm-profile /path/to/activation-baking/results/norm_profiles/qwen2.5-7b-instruct.csv \
+    --output-dir experiments/data
+```
+
+Saves `experiments/data/french_vectors.npz` — same schema as the actbak safety vectors.
+
+### Step 2 — Run steering evaluation
+
+```bash
+python experiments/steering_av_eval.py \
+    --config configs/qwen7b_layer20.yaml \
+    --av-checkpoint checkpoints/grpo/final_av \
+    --nla-meta data/labeled/nla_meta_av.yaml \
+    --actbak-dir /path/to/activation-baking \
+    --output-dir experiments/results \
+    --k-scale 1.0 \
+    --n-texts 40
+```
+
+Produces:
+
+- `experiments/results/steering_eval.json` — per-sample descriptions + cosine shift metrics
+- `experiments/figures/steering_eval_cosine_shift.png` — activation shift vs baseline per layer × mode × behavior
+- `experiments/figures/steering_eval_detection_rate.png` — did the AV describe the steered concept?
+- `experiments/figures/steering_eval_qualitative.png` — description comparison grid at L20
+
+K values are read directly from the actbak norm profile (L18=4.933, L19=5.099, L20=5.355,
+L21=5.734, L22=6.189) so scale is consistent with actbak's ramp evaluation. Use `--k-scale`
+to explore conservative (0.5) or strong (2.0) intervention strengths.
+
+---
+
 ## Using the Trained Checkpoint
 
 See the [model card](https://huggingface.co/Kameshr/nla-qwen2.5-7b-L20-av) for a self-contained usage example with no dependency on this training repo.
