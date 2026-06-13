@@ -26,7 +26,6 @@ Usage:
         --config configs/qwen7b_layer20.yaml \
         --av-checkpoint checkpoints/grpo/final_av \
         --nla-meta data/labeled/nla_meta_av.yaml \
-        --actbak-dir /path/to/activation-baking \
         --output-dir experiments/results \
         [--k-scale 1.0] [--n-texts 40]
 """
@@ -37,9 +36,9 @@ import argparse
 import gc
 import json
 import logging
-import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator, Literal
 
 import matplotlib
 matplotlib.use("Agg")
@@ -52,6 +51,64 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
+
+InjectMode = Literal["broadcast", "last_token"]
+
+
+class ActivationSteerer:
+    """Injects K·direction into transformer residual streams via forward hooks.
+
+    Inlined from activation-baking/activation_baking/steerer.py — no external
+    dependency required.
+    """
+
+    def __init__(self, model) -> None:
+        self._model = model
+        self._hooks: list = []
+
+    def _make_hook(self, direction: np.ndarray, k_value: float,
+                   inject_mode: InjectMode = "broadcast"):
+        dir_tensor = torch.from_numpy(direction.copy()).float()
+        delta_cpu = dir_tensor * k_value
+        if inject_mode == "last_token":
+            def hook(module, input, output):
+                hidden = output[0] if isinstance(output, tuple) else output
+                delta = delta_cpu.to(device=hidden.device, dtype=hidden.dtype)
+                steered = hidden.clone()
+                steered[:, -1, :] = steered[:, -1, :] + delta
+                return (steered,) + output[1:] if isinstance(output, tuple) else steered
+        else:
+            def hook(module, input, output):
+                hidden = output[0] if isinstance(output, tuple) else output
+                delta = delta_cpu.to(device=hidden.device, dtype=hidden.dtype)
+                steered = hidden + delta.view(1, 1, -1)
+                return (steered,) + output[1:] if isinstance(output, tuple) else steered
+        return hook
+
+    def _install(self, layer_configs: dict) -> None:
+        for layer_idx, cfg in layer_configs.items():
+            direction, k_value = cfg[0], cfg[1]
+            inject_mode: InjectMode = cfg[2] if len(cfg) == 3 else "broadcast"
+            handle = self._model.model.layers[layer_idx].register_forward_hook(
+                self._make_hook(direction, k_value, inject_mode)
+            )
+            self._hooks.append(handle)
+
+    def _remove(self) -> None:
+        for h in self._hooks:
+            h.remove()
+        self._hooks.clear()
+
+    @contextmanager
+    def steer(self, layer_configs: dict) -> Generator[None, None, None]:
+        """Context manager: temporarily apply steering hooks."""
+        self._remove()
+        self._install(layer_configs)
+        try:
+            yield
+        finally:
+            self._remove()
+
 
 PROBE_LAYERS = [18, 19, 20, 21, 22]
 
@@ -226,7 +283,6 @@ def run_steering_eval(
     config_path: str,
     av_checkpoint: str,
     nla_meta_path: str,
-    actbak_dir: str,
     output_dir: str,
     k_scale: float = 1.0,
     n_texts: int = 40,
@@ -239,7 +295,6 @@ def run_steering_eval(
         config_path: Path to qwen7b_layer20.yaml.
         av_checkpoint: Path to AV LoRA checkpoint.
         nla_meta_path: Path to nla_meta_av.yaml.
-        actbak_dir: Root of the activation-baking repo.
         output_dir: Where to write results and figures.
         k_scale: Multiplier on the calibrated K values (1.0 = formula-derived).
         n_texts: Number of eval texts to use.
@@ -250,27 +305,17 @@ def run_steering_eval(
     with open(nla_meta_path) as f:
         nla_meta = yaml.safe_load(f)
 
-    actbak = Path(actbak_dir)
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     fig_dir = Path("experiments/figures")
     fig_dir.mkdir(parents=True, exist_ok=True)
 
-    # Add actbak to sys.path for ActivationSteerer
-    if str(actbak) not in sys.path:
-        sys.path.insert(0, str(actbak))
-    from activation_baking.steerer import ActivationSteerer
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     texts = EVAL_TEXTS[:n_texts]
 
-    # Vector paths — safety.npz is bundled in experiments/steering_data/;
-    # fall back to actbak repo if user has it checked out
-    _bundled_safety = Path("experiments/steering_data/safety.npz")
-    if _bundled_safety.exists():
-        safety_npz = _bundled_safety
-    else:
-        safety_npz = actbak / "results/directions/qwen2.5-7b-instruct/safety.npz"
+    safety_npz = Path("experiments/steering_data/safety.npz")
+    if not safety_npz.exists():
+        raise FileNotFoundError(f"Safety vectors not found at {safety_npz}")
 
     # French vectors are derived locally (not versioned — too cheap to precompute)
     french_npz = Path("experiments/steering_data/french_vectors.npz")
@@ -505,8 +550,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", default="configs/qwen7b_layer20.yaml")
     p.add_argument("--av-checkpoint", default="checkpoints/grpo/final_av")
     p.add_argument("--nla-meta", default="data/labeled/nla_meta_av.yaml")
-    p.add_argument("--actbak-dir", default="",
-                   help="Root of the activation-baking repo (only needed if safety.npz not in experiments/steering_data/)")
     p.add_argument("--output-dir", default="experiments/results")
     p.add_argument("--k-scale", type=float, default=1.0,
                    help="Multiplier on calibrated K values (0.5=conservative, 2.0=strong)")
@@ -524,7 +567,6 @@ def main() -> None:
         config_path=args.config,
         av_checkpoint=args.av_checkpoint,
         nla_meta_path=args.nla_meta,
-        actbak_dir=args.actbak_dir,
         output_dir=args.output_dir,
         k_scale=args.k_scale,
         n_texts=args.n_texts,
