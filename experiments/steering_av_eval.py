@@ -264,13 +264,20 @@ def run_steering_eval(
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     texts = EVAL_TEXTS[:n_texts]
 
-    # Vector paths
-    safety_npz = actbak / "results/directions/qwen2.5-7b-instruct/safety.npz"
-    french_npz = Path("experiments/data/french_vectors.npz")
+    # Vector paths — safety.npz is bundled in experiments/steering_data/;
+    # fall back to actbak repo if user has it checked out
+    _bundled_safety = Path("experiments/steering_data/safety.npz")
+    if _bundled_safety.exists():
+        safety_npz = _bundled_safety
+    else:
+        safety_npz = actbak / "results/directions/qwen2.5-7b-instruct/safety.npz"
+
+    # French vectors are derived locally (not versioned — too cheap to precompute)
+    french_npz = Path("experiments/steering_data/french_vectors.npz")
     if not french_npz.exists():
         raise FileNotFoundError(
             f"French vectors not found at {french_npz}. "
-            "Run: python experiments/derive_french_vectors.py --norm-profile <path>"
+            "Run: python experiments/derive_french_vectors.py"
         )
 
     behaviors = {
@@ -498,8 +505,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", default="configs/qwen7b_layer20.yaml")
     p.add_argument("--av-checkpoint", default="checkpoints/grpo/final_av")
     p.add_argument("--nla-meta", default="data/labeled/nla_meta_av.yaml")
-    p.add_argument("--actbak-dir", required=True,
-                   help="Root of the activation-baking repo")
+    p.add_argument("--actbak-dir", default="",
+                   help="Root of the activation-baking repo (only needed if safety.npz not in experiments/steering_data/)")
     p.add_argument("--output-dir", default="experiments/results")
     p.add_argument("--k-scale", type=float, default=1.0,
                    help="Multiplier on calibrated K values (0.5=conservative, 2.0=strong)")

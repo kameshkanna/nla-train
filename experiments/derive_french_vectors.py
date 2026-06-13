@@ -265,9 +265,10 @@ def derive_french_vectors(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Derive French CAA steering vectors")
     p.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct")
-    p.add_argument("--norm-profile", required=True,
-                   help="Path to actbak qwen2.5-7b-instruct.csv norm profile")
-    p.add_argument("--output-dir", default="experiments/data")
+    p.add_argument("--norm-profile",
+                   default="experiments/steering_data/qwen2.5-7b-norm-profile.csv",
+                   help="Path to actbak norm profile CSV")
+    p.add_argument("--output-dir", default="experiments/steering_data")
     p.add_argument("--n-pairs", type=int, default=120)
     p.add_argument("--batch-size", type=int, default=4)
     return p.parse_args()

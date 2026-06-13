@@ -174,12 +174,10 @@ and French-language CAA vectors derived from 120 contrastive pairs.
 ```bash
 source nla-val-env/bin/activate
 python experiments/derive_french_vectors.py \
-    --model Qwen/Qwen2.5-7B-Instruct \
-    --norm-profile /path/to/activation-baking/results/norm_profiles/qwen2.5-7b-instruct.csv \
-    --output-dir experiments/data
+    --model Qwen/Qwen2.5-7B-Instruct
 ```
 
-Saves `experiments/data/french_vectors.npz` — same schema as the actbak safety vectors.
+Saves `experiments/steering_data/french_vectors.npz`. The norm profile and safety vectors are already bundled in `experiments/steering_data/`.
 
 ### Step 2 — Run steering evaluation
 
@@ -188,7 +186,6 @@ python experiments/steering_av_eval.py \
     --config configs/qwen7b_layer20.yaml \
     --av-checkpoint checkpoints/grpo/final_av \
     --nla-meta data/labeled/nla_meta_av.yaml \
-    --actbak-dir /path/to/activation-baking \
     --output-dir experiments/results \
     --k-scale 1.0 \
     --n-texts 40
