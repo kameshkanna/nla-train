@@ -1186,54 +1186,54 @@
         0.012327159754931927
       ]
     ],
-    "broadcast_description": "<explanation>Chinese product description format with \"AI\" and \"Marketing\" tags suggesting a search or query context about a brand or company name.\n\nThe phrase \"This is a Chinese product description. I'm looking for the 'Happy Birthday' image\" implies an incomplete question or search term, likely a forum or social media post asking about a specific topic or concept.\n\nFinal token \"product.\" ends",
-    "broadcast_cosine_vs_baseline": 0.7083654403686523,
-    "broadcast_detects_concept": false,
+    "broadcast_description": "<explanation>Chinese product description format with \"AI\" tag suggesting a search or marketing context, likely a forum or social media post about a brand name or concept.\n\nThe phrase \"This is a Chinese product title and description. I'm looking for the 'Happy Birthday' image\" implies an incomplete question or query structure, likely a platform or search term context about a specific topic or brand.\n\nFinal",
+    "broadcast_cosine_vs_baseline": 0.7056729197502136,
+    "broadcast_detects_concept": true,
     "broadcast_next_tokens": [
       [
         "\u6211",
-        0.21431633830070496
-      ],
-      [
-        "\u5982\u4f55",
-        0.07406574487686157
+        0.21882976591587067
       ],
       [
         "\u6211\u60f3",
-        0.06957832723855972
+        0.07104362547397614
+      ],
+      [
+        "\u5982\u4f55",
+        0.07104362547397614
       ],
       [
         "\u8bf7",
-        0.054187655448913574
+        0.04586920887231827
       ],
       [
         "\u5728",
-        0.03964453563094139
+        0.04047943651676178
       ],
       [
         "I",
-        0.030875196680426598
+        0.029615387320518494
       ],
       [
         "Can",
-        0.02404562570154667
-      ],
-      [
-        "\u8bf7\u95ee",
-        0.021220190450549126
+        0.017962640151381493
       ],
       [
         "\u7f16\u5199",
-        0.017592156305909157
+        0.017962640151381493
       ],
       [
-        "How",
-        0.01458441000431776
+        "\u6211\u5728",
+        0.016874339431524277
+      ],
+      [
+        "\u8bf7\u95ee",
+        0.016874339431524277
       ]
     ],
     "last_token_description": "<explanation>Chinese product description format with \"AI\" and \"Marketing\" tags suggesting a search or query context about a brand or topic.\n\nThe phrase \"This is a Chinese product title: 'What is the meaning of...' followed by 'Hello, I'm looking for' implies an incomplete or informal query pattern, likely a social media or forum post about a specific topic or image.\n\nFinal token",
     "last_token_cosine_vs_baseline": 0.7093834280967712,
-    "last_token_detects_concept": false,
+    "last_token_detects_concept": true,
     "last_token_next_tokens": [
       [
         "\u6211",
@@ -1285,7 +1285,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia article format with structured search results listing, suggesting a query about the Eiffel Tower's height or image.\n\nThe phrase \"The Eiffel Tower is a famous French monument known as the Eiff\" implies an incomplete noun phrase (\"Eiffel Tower\"), likely a Wikipedia article title or a specific event or feature related to the tower's construction or appearance.\n\nFinal token",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         "el",
@@ -1329,53 +1329,53 @@
       ]
     ],
     "broadcast_description": "<explanation>Wikipedia article format with a search result page structure, listing \"Eiffel Tower\" related terms and phrases.\n\nThe phrase \"The Eiffel Tower is a famous French landmark that has been associated with the Eiffel\" suggests a query or definition context about the Eiffel Tower's name or image, likely a popular cultural or tourist term like \"Tower.\"\n\nFinal token",
-    "broadcast_cosine_vs_baseline": 0.7950018048286438,
-    "broadcast_detects_concept": true,
+    "broadcast_cosine_vs_baseline": 0.7924811244010925,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         " Tower",
-        0.9999202489852905
+        0.9999102354049683
       ],
       [
         " tower",
-        7.484586967620999e-05
+        8.481062104692683e-05
       ],
       [
         "Tower",
-        1.760205918799329e-06
+        2.2601266209676396e-06
       ],
       [
         " Tour",
-        1.5533763644270948e-06
+        1.067608195626235e-06
       ],
       [
         " Towers",
-        9.421703452971997e-07
+        8.314540878018306e-07
       ],
       [
         "\u5854",
-        5.043074224886368e-07
-      ],
-      [
-        " Tor",
-        4.690790333938821e-08
+        5.714495046049706e-07
       ],
       [
         " towers",
-        4.1396077676836285e-08
+        4.690743438118261e-08
       ],
       [
-        " Tow",
-        3.888801458629132e-08
+        " Tor",
+        4.690743438118261e-08
       ],
       [
         " Iron",
-        2.845107971438665e-08
+        4.1395662009335865e-08
+      ],
+      [
+        " Tow",
+        3.653154223570709e-08
       ]
     ],
     "last_token_description": "<explanation>Wikipedia article format with a search result page structure, listing definitions and facts about the Eiffel Tower, suggesting a query or trivia context.\n\nThe phrase \"The Eiffel\" is incomplete, likely a search term or title reference (\"Eiffel Tower\"), implying a famous landmark's name or image, possibly a French tourist attraction or cultural icon.\n\nFinal token \"Eiff",
     "last_token_cosine_vs_baseline": 0.7958369851112366,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         " Tower",
@@ -1427,7 +1427,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia-style product description format with a \"Question\" section listing topics, suggesting a chatbot or forum context about a book or image.\n\nThe phrase \"This is a question mark emoji, which means 'What is the meaning of this emoji?'\" implies a closing tag or incomplete phrase, likely a platform-specific response or humor label, followed by a numeric code or category.\n\nFinal",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         "  \n  \n",
@@ -1470,54 +1470,54 @@
         0.007451904471963644
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia-style product description format with a search query pattern (\"What is the meaning of 'I'm sorry' in Chinese?\"), suggesting a social media or forum context.\n\nThe phrase \"This tag has been searched: 1234567890\" implies a numbered list or search result section, likely followed by a closing tag or continuation describing the question's",
-    "broadcast_cosine_vs_baseline": 0.7355895638465881,
-    "broadcast_detects_concept": true,
+    "broadcast_description": "<explanation>Wikipedia-style product description format with a search query pattern (\"What is the meaning of 'I'm sorry'\"), suggesting a social media or forum context.\n\nThe phrase \"This tag has been searched: 1234567890\" implies a numbered list or search result section, likely followed by a closing tag or continuation describing the brand's characteristics or usage",
+    "broadcast_cosine_vs_baseline": 0.736865222454071,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         "\n\n",
-        0.6900173425674438
-      ],
-      [
-        "\n",
-        0.25384321808815
+        0.39310532808303833
       ],
       [
         "\u751f\u6210",
-        0.017274247482419014
-      ],
-      [
-        "<|endoftext|>",
-        0.003854405600577593
+        0.27017706632614136
       ],
       [
         "system",
-        0.003854405600577593
+        0.08771365135908127
       ],
       [
-        "enerate",
-        0.0030018140096217394
+        "\n",
+        0.04694973677396774
       ],
       [
         "\u56de\u7b54",
-        0.0020631146617233753
+        0.017271842807531357
       ],
       [
-        "\u8bf7",
-        0.0011043057311326265
+        "enerate",
+        0.009841199964284897
       ],
       [
-        " Please",
-        0.0007129933219403028
+        "\u7cfb\u7edf",
+        0.007664334028959274
+      ],
+      [
+        "<|endoftext|>",
+        0.007664334028959274
+      ],
+      [
+        "user",
+        0.006763750221580267
       ],
       [
         "Brief",
-        0.000669795204885304
+        0.005607346072793007
       ]
     ],
     "last_token_description": "<explanation>Wikipedia-style product description format with a search query pattern (\"What is the meaning of 'I'm sorry'\"), suggesting a social media or forum context.\n\nThe phrase \"This tag is a search result from Yahoo Answers\" implies a closing tag or incomplete phrase, likely a question about the word \"Coca-Cola\" or similar brand name, followed by a second word or phrase completing",
     "last_token_cosine_vs_baseline": 0.7409751415252686,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         "\n\n",
@@ -1569,7 +1569,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia article format with structured metadata tags (\"Definition\" and \"About\") suggesting a search or product description context.\n\nThe phrase \"What is the name of the book 'The Hunger Games'?\" implies an incomplete question or title, likely a search result or Wikipedia page about a specific topic or organization's activities, suggesting a second word or phrase follows.\n\nFinal token \"What\" opens",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         " is",
@@ -1612,49 +1612,49 @@
         0.0029866972472518682
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia article format with structured metadata and search results, suggesting a query about \"The Lord of the Rings\" book or language.\n\nThe phrase \"What language\" implies a question or label field, likely a Wikipedia page title or description section, suggesting an incomplete or ambiguous term like \"the language used\" or \"is this book written in?\"\n\nFinal token \"language\" ends mid-",
-    "broadcast_cosine_vs_baseline": 0.585508406162262,
+    "broadcast_description": "<explanation>Wikipedia article format with structured metadata and search results, suggesting a query about \"The Lord of the Rings\" book or language.\n\nThe phrase \"What language\" implies a question or label field, likely a Wikipedia page title or description section, suggesting a user interface or search result context about the language of the book or its translation.\n\nFinal token \"language\" ends an incomplete noun phrase",
+    "broadcast_cosine_vs_baseline": 0.5852498412132263,
     "broadcast_detects_concept": true,
     "broadcast_next_tokens": [
       [
         " is",
-        0.46050921082496643
+        0.4186870753765106
       ],
       [
         " does",
-        0.19196879863739014
-      ],
-      [
-        " do",
-        0.06232314184308052
+        0.1977737694978714
       ],
       [
         " family",
-        0.06232314184308052
+        0.07275689393281937
       ],
       [
         " did",
-        0.054999981075525284
+        0.06420774012804031
       ],
       [
-        " should",
-        0.04853731021285057
+        " do",
+        0.06420774012804031
       ],
       [
         " model",
-        0.03780089691281319
+        0.05000504106283188
+      ],
+      [
+        " should",
+        0.04412928968667984
       ],
       [
         " was",
-        0.03335917741060257
+        0.03894396126270294
       ],
       [
         " families",
-        0.009557562880218029
+        0.012643254362046719
       ],
       [
-        " can",
-        0.005796955432742834
+        " are",
+        0.005270492285490036
       ]
     ],
     "last_token_description": "<explanation>Wikipedia article format with structured metadata and search results, suggesting a query about \"The Lord of the Rings\" book or language.\n\nThe phrase \"What language\" implies a question or label field, likely a Wikipedia page title or description section, suggesting a user interface or search result context about the language of the book or its translation.\n\nFinal token \"language\" ends an incomplete noun phrase",
@@ -1754,54 +1754,54 @@
         0.00758679723367095
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia-style food blog format with a search query structure (\"Search for a recipe or dish\"), suggesting a user-defined tag or query about a specific food item.\n\nThe phrase \"A search for a\" implies an incomplete query or title, likely a food blog post or recipe category, with \"spicy chicken\" or similar culinary theme expected next.\n\nFinal token \"a\" is an",
-    "broadcast_cosine_vs_baseline": 0.8475732803344727,
-    "broadcast_detects_concept": true,
+    "broadcast_description": "<explanation>Wikipedia-style food blog format with a search query structure (\"Search for a recipe or dish\"), suggesting a user is seeking a specific food item or recipe title.\n\nThe phrase \"A search term like 'Easy Italian dinner ideas' or 'A\" implies an incomplete query or list of keywords, likely a food blog or recipe category title about a specific dish or meal.\n\nFinal token \"",
+    "broadcast_cosine_vs_baseline": 0.8472336530685425,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
-        " simple",
-        0.1121145635843277
-      ],
-      [
         " healthy",
-        0.1121145635843277
+        0.12384724617004395
       ],
       [
         " vegan",
-        0.09894075244665146
+        0.10929480940103531
+      ],
+      [
+        " simple",
+        0.10929480940103531
       ],
       [
         " classic",
-        0.0873149111866951
+        0.08511888980865479
       ],
       [
         " traditional",
-        0.0873149111866951
+        0.07511715590953827
       ],
       [
         " vegetarian",
-        0.06388095021247864
+        0.05850129947066307
       ],
       [
         " delicious",
-        0.04975053668022156
-      ],
-      [
-        " quick",
-        0.0341930091381073
+        0.04280046373605728
       ],
       [
         " dessert",
-        0.0341930091381073
+        0.04020731523633003
+      ],
+      [
+        " quick",
+        0.03131348639726639
       ],
       [
         " spicy",
-        0.020739110186696053
+        0.017841888591647148
       ]
     ],
     "last_token_description": "<explanation>Wikipedia-style food blog format with a search query structure (\"Search for a recipe or dish\"), suggesting a user-defined tag or query about a specific food item.\n\nThe phrase \"A search for a\" implies an incomplete query or title, likely a food blog post or recipe category, with \"spicy chicken\" or similar culinary theme expected next.\n\nFinal token \"a\" is an",
     "last_token_cosine_vs_baseline": 0.848706841468811,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         " healthy",
@@ -1896,54 +1896,54 @@
         0.00213725958019495
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia format with a search query structure (\"How to say 'Hello' in Japanese\"), suggesting a question about greeting or formal expression context.\n\nThe phrase \"How to say 'Good morning' in a polite way\" implies a list or definition of Japanese greetings, likely followed by a specific cultural or linguistic context about the phrase \"\u3053\u3093\u306b\u3061\u306f\" being formal or polite.\n\nFinal token \"way",
-    "broadcast_cosine_vs_baseline": 0.7090964317321777,
-    "broadcast_detects_concept": false,
+    "broadcast_description": "<explanation>Wikipedia format with a search query structure (\"How to say 'Hello' in Japanese\"), suggesting a question about greeting or formal expression context.\n\nThe phrase \"How to say 'Good morning' in a polite way\" implies an incomplete or informal tag, likely a list or definition of Japanese greetings, possibly a cultural or social context about formal Japanese expressions.\n\nFinal token \"way\" ends",
+    "broadcast_cosine_vs_baseline": 0.7096784710884094,
+    "broadcast_detects_concept": true,
     "broadcast_next_tokens": [
       [
         " in",
-        0.9507972002029419
+        0.9542607069015503
       ],
       [
         "?",
-        0.03253449127078056
-      ],
-      [
-        ",",
-        0.003429110161960125
+        0.02881617657840252
       ],
       [
         " when",
-        0.0030261792708188295
+        0.003037202637642622
       ],
       [
         " for",
-        0.0026705937925726175
+        0.003037202637642622
       ],
       [
         " to",
-        0.0020798605401068926
+        0.002680322155356407
+      ],
+      [
+        ",",
+        0.002680322155356407
       ],
       [
         " and",
-        0.0009824564913287759
+        0.0009860353311523795
       ],
       [
         " that",
-        0.0008670148090459406
+        0.0008701730985194445
       ],
       [
         " according",
-        0.0007651378982700408
+        0.0006776914815418422
       ],
       [
         " using",
-        0.000361425569280982
+        0.0003627421392593533
       ]
     ],
     "last_token_description": "<explanation>Wikipedia format with a search query structure (\"How to say 'Hello' in Japanese\"), suggesting a question about greeting phrase or cultural context.\n\nThe phrase \"How to say 'Good morning' in a polite way\" implies a list or definition context, likely a question about formal Japanese greetings or a specific phrase, possibly a social media or etiquette context.\n\nFinal token \"way\" ends",
     "last_token_cosine_vs_baseline": 0.7128719091415405,
-    "last_token_detects_concept": false,
+    "last_token_detects_concept": true,
     "last_token_next_tokens": [
       [
         " in",
@@ -1995,7 +1995,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia-style product description format with a search query structure (\"Definition of 'Globalization'\"), suggesting a definition or explanation page about a specific term.\n\nThe phrase \"Search for the concept of globalization\" implies a list or definition section, likely continuing with \"What is globalization?\" or \"The process of globalization\" or similar, followed by numbered points or attributes about the term's meaning",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         " concept",
@@ -2038,54 +2038,54 @@
         0.0192730575799942
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia article format with a search result page structure, listing definitions and meanings for \"French cuisine\" with a title suggesting a cultural or historical context.\n\nThe phrase \"This word is often used to describe the French\" implies an incomplete or informal term or concept about France's political or cultural practices, likely a Wikipedia article title or definition section.\n\nFinal token \"French\" ends mid-",
-    "broadcast_cosine_vs_baseline": 0.6902824640274048,
-    "broadcast_detects_concept": true,
+    "broadcast_description": "<explanation>Wikipedia article format with a search result page structure, listing definitions and meanings for \"French cuisine\" with a title suggesting a cultural or historical context.\n\nThe phrase \"This is a French\" implies an incomplete or informal query about the term \"French Revolution,\" likely a Wikipedia article or similar context about a country's name or cultural concept.\n\nFinal token \"French\" ends mid-phrase",
+    "broadcast_cosine_vs_baseline": 0.6914597153663635,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         " Revolution",
-        0.5156521201133728
+        0.4886636734008789
       ],
       [
         " phrase",
-        0.05785456299781799
+        0.06613343954086304
       ],
       [
         " revolution",
-        0.039762821048498154
-      ],
-      [
-        " political",
-        0.02732856012880802
+        0.0401119589805603
       ],
       [
         " word",
-        0.025672806426882744
+        0.035398680716753006
       ],
       [
         " term",
-        0.022656172513961792
+        0.0332539826631546
+      ],
+      [
+        " political",
+        0.029346534982323647
       ],
       [
         " language",
-        0.01878262683749199
+        0.018947547301650047
       ],
       [
         " Revolutionary",
-        0.017644645646214485
+        0.015708068385720253
       ],
       [
         " colonial",
-        0.014627925120294094
+        0.01302244607359171
       ],
       [
         " military",
-        0.011392238549888134
+        0.010795986279845238
       ]
     ],
     "last_token_description": "<explanation>Wikipedia article format with a search result page structure, listing definitions and meanings for \"French cuisine\" with a title suggesting a cultural or historical context.\n\nThe phrase \"This is the French\" implies an incomplete or informal query about a country's name or concept, likely a Wikipedia article title or tagline about French culture or language, suggesting a second word or phrase follows.\n\nFinal token",
     "last_token_cosine_vs_baseline": 0.6980891227722168,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         " Revolution",
@@ -2180,54 +2180,54 @@
         0.012327159754931927
       ]
     ],
-    "broadcast_description": "<explanation>Chinese product description format with \"AI\" and \"Marketing\" tags suggesting a search or query context about a brand or company name.\n\nThe phrase \"This is a Chinese product description. I'm looking for the 'Happy Birthday' image\" implies an incomplete question or search term, likely a forum or social media post asking about a specific topic or concept.\n\nFinal token \"product.\" ends",
-    "broadcast_cosine_vs_baseline": 0.7083654403686523,
-    "broadcast_detects_concept": false,
+    "broadcast_description": "<explanation>Chinese product description format with \"AI\" tag suggesting a search or marketing context, likely a forum or social media post about a brand name or concept.\n\nThe phrase \"This is a Chinese product title and description. I'm looking for the 'Happy Birthday' image\" implies an incomplete question or query structure, likely a platform or search term context about a specific topic or brand.\n\nFinal",
+    "broadcast_cosine_vs_baseline": 0.7056729197502136,
+    "broadcast_detects_concept": true,
     "broadcast_next_tokens": [
       [
         "\u6211",
-        0.21431633830070496
-      ],
-      [
-        "\u5982\u4f55",
-        0.07406574487686157
+        0.21882976591587067
       ],
       [
         "\u6211\u60f3",
-        0.06957832723855972
+        0.07104362547397614
+      ],
+      [
+        "\u5982\u4f55",
+        0.07104362547397614
       ],
       [
         "\u8bf7",
-        0.054187655448913574
+        0.04586920887231827
       ],
       [
         "\u5728",
-        0.03964453563094139
+        0.04047943651676178
       ],
       [
         "I",
-        0.030875196680426598
+        0.029615387320518494
       ],
       [
         "Can",
-        0.02404562570154667
-      ],
-      [
-        "\u8bf7\u95ee",
-        0.021220190450549126
+        0.017962640151381493
       ],
       [
         "\u7f16\u5199",
-        0.017592156305909157
+        0.017962640151381493
       ],
       [
-        "How",
-        0.01458441000431776
+        "\u6211\u5728",
+        0.016874339431524277
+      ],
+      [
+        "\u8bf7\u95ee",
+        0.016874339431524277
       ]
     ],
     "last_token_description": "<explanation>Chinese product description format with \"AI\" and \"Marketing\" tags suggesting a search or query context about a brand or topic.\n\nThe phrase \"This is a Chinese product title: 'What is the meaning of...' followed by 'Hello, I'm looking for' implies an incomplete or informal query pattern, likely a social media or forum post about a specific topic or image.\n\nFinal token",
     "last_token_cosine_vs_baseline": 0.7093834280967712,
-    "last_token_detects_concept": false,
+    "last_token_detects_concept": true,
     "last_token_next_tokens": [
       [
         "\u6211",
@@ -2421,7 +2421,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia-style article format with a definition section describing \"mitochondria,\" suggesting a student or dictionary entry structure.\n\nThe phrase \"The term mitochondria is the\" implies a common scientific definition or metaphor about the cell's function, likely continuing with \"powerhouse of the cell\" or \"organ that produces energy\" or similar biological terminology about the organelle's role.\n\nFinal",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         " powerhouse",
@@ -2464,54 +2464,54 @@
         0.0019178611692041159
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia article format with a definition section describing \"Mitochondria,\" likely a student or dictionary entry with a tagline or image.\n\nThe phrase \"The mitochondrion is the powerhouse\" suggests an incomplete or informal term, likely a common colloquial or humorous description of cells' energy-producing function, implying a Wikipedia article about mitochondria's role in plant cells.\n\nFinal token",
-    "broadcast_cosine_vs_baseline": 0.664160966873169,
-    "broadcast_detects_concept": true,
+    "broadcast_description": "<explanation>Wikipedia article format with a student-friendly definition of \"Mitochondria,\" using a tagline structure with a common phrase about the cell's energy production.\n\nThe phrase \"The mitochondria is often called the powerhouse\" suggests a familiar idiomatic expression or definition, likely a colloquial term or metaphor about the cell's function, implying the next word will complete a famous biological analogy",
+    "broadcast_cosine_vs_baseline": 0.666550874710083,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         " of",
-        0.9993329644203186
+        0.9993463158607483
       ],
       [
         " in",
-        0.00029584727599285543
+        0.00029585123411379755
       ],
       [
         " that",
-        7.480190834030509e-05
+        7.480290514649823e-05
       ],
       [
         " for",
-        4.536964843282476e-05
+        5.1411232561804354e-05
       ],
       [
         " and",
-        4.536964843282476e-05
+        4.0039103623712435e-05
       ],
       [
         " because",
-        4.003856884082779e-05
-      ],
-      [
-        ",",
-        3.5333916457602754e-05
-      ],
-      [
-        " within",
-        3.118207314400934e-05
+        3.1182487873593345e-05
       ],
       [
         " or",
-        2.751808460743632e-05
+        3.1182487873593345e-05
       ],
       [
-        " inside",
-        8.933813660405576e-06
+        " within",
+        2.7518450224306434e-05
+      ],
+      [
+        ",",
+        2.4284945538965985e-05
+      ],
+      [
+        " cell",
+        1.2998794773011468e-05
       ]
     ],
     "last_token_description": "<explanation>Wikipedia article format with a definition section describing \"Mitochondria,\" likely a student or dictionary entry with a tagline or image.\n\nThe phrase \"The mitochondrion is the powerhouse\" suggests a common colloquial or informal term (\"powerhouse of the cell\"), implying a Wikipedia article or definition context about mitochondria's function or nickname.\n\nFinal token \"powerhouse\" ends",
     "last_token_cosine_vs_baseline": 0.6664976477622986,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         " of",
@@ -2705,7 +2705,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia-style question format with a search result pattern (\"What is the capital of Australia?\"), suggesting a simple factual query about a country's capital city.\n\nThe phrase \"The capital of Canada is\" implies an incomplete or common knowledge question, likely a fill-in-the-blank or trivia format, expecting \"Washington D.C.\" or \"the capital of Australia\" as the answer.\n\n",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         " Canberra",
@@ -2748,54 +2748,54 @@
         0.0044070701114833355
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia article format with a search result entry describing a country's capital city, using a simple definition structure with \"Canberra\" as the subject.\n\nThe phrase \"The name of the capital is Canberra\" suggests a common noun phrase or title pattern, likely a Wikipedia article about Australia's capital city, implying a second word or phrase follows to complete the name.\n\nFinal token \"Can",
-    "broadcast_cosine_vs_baseline": 0.6280220150947571,
-    "broadcast_detects_concept": true,
+    "broadcast_description": "<explanation>Wikipedia article format with a search result entry describing a country's capital city, suggesting a definition or description of Canberra.\n\nThe phrase \"The name 'Canberra' is often mistaken as the capital of Australia\" implies a list or title pattern, likely continuing with a noun phrase about the city's characteristics or origin, or a search result context about the word \"Canberra.\"\n\nFinal",
+    "broadcast_cosine_vs_baseline": 0.6318023204803467,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         ".",
-        0.81186443567276
+        0.8104673027992249
       ],
       [
         ",",
-        0.18115144968032837
+        0.18083970248699188
       ],
       [
         " and",
-        0.005470299627631903
+        0.007011916022747755
       ],
       [
         " but",
-        0.0008388975984416902
+        0.000948959612287581
       ],
       [
         " which",
-        0.0001651887287152931
+        0.0002117414987878874
       ],
       [
         " while",
-        0.0001651887287152931
+        0.00016490445705130696
       ],
       [
         ";",
-        0.00014577854017261416
+        0.00012842772412113845
       ],
       [
         " with",
-        6.076954377931543e-05
+        7.789535447955132e-05
       ],
       [
         " (",
-        3.6858589737676084e-05
+        4.7245917812688276e-05
       ],
       [
         " where",
-        1.5364945284090936e-05
+        1.7380802091793157e-05
       ]
     ],
     "last_token_description": "<explanation>Wikipedia-style article format with a search result entry describing a country's capital city, suggesting a definition or description of Canberra.\n\nThe phrase \"The name 'Canberra' is often mistaken as the capital of Australia\" implies a common noun phrase or title, likely a proper noun or wordplay about the Australian capital's name or location.\n\nFinal token \"Canberra\" ends an incomplete",
     "last_token_cosine_vs_baseline": 0.6337606310844421,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         ".",
@@ -2989,7 +2989,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia-style article format with a search query structure (\"How many books did Shakespeare write?\"), suggesting a definition or count of works.\n\nThe phrase \"This question is about the total number of works attributed to William Shakespeare\" implies a specific claim or statistic about Shakespeare's literary output, likely a well-known figure count or reputation.\n\nFinal token \"\u043b\u044c\u043d\u043d\u0438\u043a\u0430\" ends mid-phrase \"",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         ".imgur",
@@ -3032,49 +3032,49 @@
         0.009112231433391571
       ]
     ],
-    "broadcast_description": "<explanation>Chinese language platform format with a Wikipedia-style article structure, presenting facts about the number 2019 and its significance.\n\nThe phrase \"This is a factual statement about the year 2019, so my answer is:\" suggests a closing tag or footer, likely a confirmation or reference to a Wikipedia or AI service, implying a response or summary of the query's content",
-    "broadcast_cosine_vs_baseline": 0.31819331645965576,
+    "broadcast_description": "<explanation>Chinese language platform format with a Wikipedia-style definition entry, followed by a question about \"2021\" being a date or number.\n\nThe phrase \"This statement is a factual claim about China's population, so it can be verified as true or false.\" suggests a closing tag or footer pattern, implying the response is a Wikipedia-style article or chatbot output.\n\nFinal token \"",
+    "broadcast_cosine_vs_baseline": 0.3160773515701294,
     "broadcast_detects_concept": true,
     "broadcast_next_tokens": [
       [
         "\n",
-        0.9911584258079529
-      ],
-      [
-        "\n\n",
-        0.007567587774246931
-      ],
-      [
-        " Yes",
-        0.0004269341006875038
-      ],
-      [
-        "\u6ca1\u9519",
-        0.0002934272342827171
-      ],
-      [
-        " That",
-        0.00015706027625128627
+        0.8427101969718933
       ],
       [
         " \ufffd",
-        9.526187932351604e-05
+        0.06917386502027512
       ],
       [
-        "\r\n",
-        5.099000918562524e-05
+        "\n\n",
+        0.028835957869887352
       ],
       [
-        " Indeed",
-        3.7305086152628064e-05
+        " That",
+        0.01748989149928093
+      ],
+      [
+        "\u6ca1\u9519",
+        0.013621142134070396
+      ],
+      [
+        " Yes",
+        0.012020614929497242
+      ],
+      [
+        " \ufffd",
+        0.0050109378062188625
       ],
       [
         " Correct",
-        3.504488631733693e-05
+        0.002088869921863079
       ],
       [
         " Thank",
-        2.5639386876719072e-05
+        0.0009269303409382701
+      ],
+      [
+        " \ufffd",
+        0.0007218940882012248
       ]
     ],
     "last_token_description": "<explanation>Chinese language platform format with a Wikipedia-style definition entry, followed by a question about \"2021\" being a date or number.\n\nThe phrase \"This is a factual statement about China's population, so let's verify the information.\" suggests a closing tag or footer pattern, implying a response or confirmation section about the chatbot's credibility or facts.\n\nFinal token \"assistant.",
@@ -3273,7 +3273,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia-style product description format with a search query structure (\"Definition of 'The Lord of the Rings'\"), suggesting a forum or social media post about a book cover image.\n\nThe phrase \"This sentence: 'The title and description of this image,",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         "\n",
@@ -3316,54 +3316,54 @@
         6.758191339883979e-09
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia-style product description format with a \"Definition\" section followed by a \"Image\" tag, suggesting a search or metadata context about a book or image.\n\nThe phrase \"This is a description of the phrase 'A beautiful sunset'... Image:\" implies a closing or incomplete query pattern, likely a search result or caption context for a specific image or product.\n\nFinal token \"search",
-    "broadcast_cosine_vs_baseline": 0.756298303604126,
-    "broadcast_detects_concept": true,
+    "broadcast_description": "<explanation>Wikipedia-style product description format with a \"Definition\" section followed by a \"Image\" tag, suggesting a search or metadata context about a book or image.\n\nThe phrase \"This is a description of the phrase 'A beautiful sunset'... Image:\" implies a closing or incomplete query pattern, likely a Wikipedia or social media post title or caption context.\n\nFinal token \"search\n\"",
+    "broadcast_cosine_vs_baseline": 0.7556755542755127,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         "<|im_start|>",
-        0.9996322393417358
+        0.9995297193527222
       ],
       [
         "\ufffd\ufffd",
-        0.00010886872041737661
+        0.00015838679973967373
       ],
       [
         "@dynamic",
-        4.538323628366925e-05
+        5.142066584085114e-05
       ],
       [
         "\ud83d\ude09",
-        2.1437521354528144e-05
+        2.7523499738890678e-05
       ],
       [
         ":';\n",
-        1.4733777788933367e-05
+        2.7523499738890678e-05
       ],
       [
         "\u4ee5\u4eba\u6c11\u4e3a",
-        1.4733777788933367e-05
+        2.1435322196339257e-05
       ],
       [
         " newcom",
-        1.1474679013190325e-05
+        1.3001180377614219e-05
       ],
       [
         "/Instruction",
-        1.1474679013190325e-05
+        1.147350121755153e-05
       ],
       [
-        "/Branch",
-        7.88642319093924e-06
+        "GuidId",
+        1.0125329026777763e-05
       ],
       [
         " fkk",
-        6.959744496271014e-06
+        8.935571713664103e-06
       ]
     ],
     "last_token_description": "<explanation>Wikipedia-style product description format with a \"Definition\" section followed by a \"Image\" tag, suggesting a search or metadata context about a book or image.\n\nThe phrase \"This is a description of the phrase 'Auntie's Kitchen' - Image: \" implies a closing or incomplete query pattern, likely a search result or caption context for a specific image or question.\n\nFinal",
     "last_token_cosine_vs_baseline": 0.7647506594657898,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         "<|im_start|>",
@@ -3600,94 +3600,94 @@
         0.00018057772831525654
       ]
     ],
-    "broadcast_description": "<explanation>Chinese language platform format with a question about \"\u5747\u503c\" (mean) concept, suggesting a Wikipedia or forum-style definition context.\n\nThe phrase \"This expression '\u5747\u503c' is actually...\" implies a pattern of listing or defining a mathematical term, likely a confirmation or explanation of the given equation or concept related to a cycle or pattern.\n\nFinal token \"8. \" ends an incomplete",
-    "broadcast_cosine_vs_baseline": 0.6899694800376892,
+    "broadcast_description": "<explanation>Chinese language platform format with a question about \"\u5747\u503c\" (mean) in a mathematical context, suggesting a definition or explanation of a term.\n\nThe phrase \"This expression '\u5747\u503c' is actually...\" implies a pattern or definition section, likely a closing or humorous remark about the concept of a cycle or loop, possibly referencing the original question's title or a Wikipedia-like definition.\n\n",
+    "broadcast_cosine_vs_baseline": 0.6882731318473816,
     "broadcast_detects_concept": true,
     "broadcast_next_tokens": [
       [
         "That",
-        0.42369359731674194
-      ],
-      [
-        "Yes",
-        0.2569831609725952
+        0.47963133454322815
       ],
       [
         "The",
-        0.2569831609725952
+        0.29091110825538635
+      ],
+      [
+        "Yes",
+        0.17644652724266052
       ],
       [
         "You",
-        0.034778889268636703
+        0.03474437817931175
       ],
       [
         "Certainly",
-        0.012794438749551773
+        0.00775251816958189
       ],
       [
         "Indeed",
-        0.0077602192759513855
+        0.0041496241465210915
       ],
       [
         "Correct",
-        0.004706811159849167
-      ],
-      [
-        "Exactly",
-        0.0006369975744746625
-      ],
-      [
-        "Absolutely",
-        0.0005621484015136957
+        0.0041496241465210915
       ],
       [
         "\u6ca1\u9519",
-        0.0003409602213650942
+        0.000495601911097765
+      ],
+      [
+        "Exactly",
+        0.000495601911097765
+      ],
+      [
+        "Absolutely",
+        0.00043736715451814234
       ]
     ],
-    "last_token_description": "<explanation>Chinese language platform format with a question about \"\u5747\u503c\" (mean) concept, suggesting a Wikipedia or forum-style definition context.\n\nThe phrase \"This expression '\u5747\u503c' is actually...\" implies a pattern of listing or defining a mathematical term, likely a confirmation or explanation of the given equation or concept related to a cycle or pattern.\n\nFinal token \"8. \" ends an incomplete",
-    "last_token_cosine_vs_baseline": 0.6899694800376892,
+    "last_token_description": "<explanation>Chinese language platform format with a question about \"\u5747\u503c\" (mean) in a mathematical context, suggesting a definition or explanation of a term.\n\nThe phrase \"This expression '\u5747\u503c' is actually...\" implies a pattern or definition section, likely a closing or humorous remark about the concept of a cycle or loop, possibly referencing the original question's title or a Wikipedia-like definition.\n\n",
+    "last_token_cosine_vs_baseline": 0.6882731318473816,
     "last_token_detects_concept": true,
     "last_token_next_tokens": [
       [
         "That",
-        0.48502275347709656
+        0.521748960018158
       ],
       [
         "The",
-        0.2596139907836914
+        0.2792721092700958
       ],
       [
         "Yes",
-        0.20218755304813385
+        0.1494835764169693
       ],
       [
         "You",
-        0.0310064647346735
+        0.033354293555021286
       ],
       [
         "Certainly",
-        0.011406641453504562
+        0.007442348636686802
       ],
       [
         "Indeed",
-        0.0047549959272146225
+        0.0035155166406184435
       ],
       [
         "Correct",
-        0.0037031942047178745
+        0.00310243247076869
       ],
       [
         "Exactly",
-        0.0007292021764442325
+        0.0005391219165176153
       ],
       [
         "Absolutely",
-        0.0005011728499084711
+        0.00041986859287135303
       ],
       [
-        "Sure",
-        0.00034445073106326163
+        "\u6ca1\u9519",
+        0.00037053273990750313
       ]
     ]
   },
@@ -3841,7 +3841,7 @@
     "behavior": "french",
     "k_scale": 2.0,
     "baseline_description": "<explanation>Wikipedia-style product description format with a simple title and tagline structure, suggesting a book or story context about a character named \"The Little Bird.\"\n\nThe phrase \"A young boy named Happy lived in a small village. \" implies an incomplete sentence describing the protagonist's activities or reputation, likely continuing with a noun phrase like \"He was known for his gardening skills\" or \"His",
-    "baseline_detects_concept": true,
+    "baseline_detects_concept": false,
     "baseline_next_tokens": [
       [
         " He",
@@ -3885,53 +3885,53 @@
       ]
     ],
     "broadcast_description": "<explanation>Wikipedia template format with a book title and metadata structure, suggesting a search result or query format about \"The Hunger Games\" book.\n\nThe phrase \"This article is about the title 'The Hunger Games' and its contents\" implies a closing tag or incomplete phrase, likely a Wikipedia template or search result context, suggesting a second word or phrase describing the book's content or rating.\n\n",
-    "broadcast_cosine_vs_baseline": 0.509881854057312,
-    "broadcast_detects_concept": true,
+    "broadcast_cosine_vs_baseline": 0.5099743008613586,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         "\n",
-        0.9998071789741516
+        0.9990240335464478
       ],
       [
         "\r\n",
-        8.480187534587458e-05
+        0.00020326979574747384
       ],
       [
         "elman",
-        1.384352617606055e-05
+        7.960158836795017e-05
       ],
       [
         "_\n",
-        1.1476686267997138e-05
+        4.5355620386544615e-05
       ],
       [
         "opard",
-        2.9017608085268876e-06
+        2.5842855393420905e-05
       ],
       [
         "%\"><",
-        2.9017608085268876e-06
-      ],
-      [
-        " \",\"\n",
-        2.560794882811024e-06
+        2.5842855393420905e-05
       ],
       [
         "\t \r\n",
-        2.2598935629503103e-06
+        2.2806239940109663e-05
       ],
       [
-        "\uff1f\n",
-        1.7600068531464785e-06
+        "paralleled",
+        2.142447920050472e-05
+      ],
+      [
+        " \",\"\n",
+        1.6685400623828173e-05
       ],
       [
         "opportunit\u00e0",
-        1.553200718262815e-06
+        1.5674484529881738e-05
       ]
     ],
     "last_token_description": "<explanation>Wikipedia article format with a search result page structure, showing a book title and description with \"Search\" and \"Read\" buttons.\n\nThe phrase \"This is a fanfiction story about Harry Potter's death, with the following chapters:\" suggests a closing tag or incomplete phrase, implying a Wikipedia template or metadata field describing the book's content or rating.\n\nFinal token \"",
     "last_token_cosine_vs_baseline": 0.5119083523750305,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         "\n",
@@ -4168,49 +4168,49 @@
         0.00313554797321558
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia template format with a \"Category:Book\" tag suggesting a search result or metadata entry about a book title, likely a Wikipedia article or forum post.\n\nThe phrase \"Search results for 'How to write a book' and 'How many pages of this book'",
-    "broadcast_cosine_vs_baseline": 0.5287125110626221,
+    "broadcast_description": "<explanation>Wikipedia template format with a \"Category:Book\" tag suggesting a search result or metadata entry about a book title, likely a Chinese language platform.\n\nThe phrase \"This article is about the 'How to' section of a book titled 'Chinese Characters' and its contents\" implies a closing tag or incomplete phrase describing the content's structure or copyright status.\n\nFinal token \"",
+    "broadcast_cosine_vs_baseline": 0.5277583599090576,
     "broadcast_detects_concept": true,
     "broadcast_next_tokens": [
       [
         "\n",
-        0.9999914169311523
+        0.9999786615371704
       ],
       [
         "\r\n",
-        7.889257176429965e-06
+        1.8925102267530747e-05
       ],
       [
         "_\n",
-        1.6373630273847084e-07
+        4.4507572738439194e-07
       ],
       [
         "**\n",
-        4.9936751622681186e-08
+        1.3574043578046258e-07
       ],
       [
         " \",\"\n",
-        3.0288170194125996e-08
-      ],
-      [
-        "`\n",
-        2.5109775592113692e-08
+        1.19790513508633e-07
       ],
       [
         "elman",
-        2.3588452080502975e-08
+        7.734256968205955e-08
       ],
       [
-        "()\n",
-        1.7257681506066547e-08
+        "%\"><",
+        7.734256968205955e-08
       ],
       [
-        "?\n",
-        1.621208944868613e-08
+        "`\n",
+        6.825457887771336e-08
       ],
       [
-        "\\n",
-        1.3440294210909087e-08
+        "\uff1f\n",
+        4.691064248163457e-08
+      ],
+      [
+        "opportunit\u00e0",
+        4.139849352213787e-08
       ]
     ],
     "last_token_description": "<explanation>Wikipedia template format with a \"Category:Book\" tag suggesting a search result or metadata entry about a book title, likely a Chinese language forum or wiki page.\n\nThe phrase \"Search results for 'How to write a book' - This article contains the following words: 123456789\" implies a closing tag or incomplete phrase describing the content's",
@@ -4452,54 +4452,54 @@
         0.012051835656166077
       ]
     ],
-    "broadcast_description": "<explanation>Wikipedia article format with structured metadata fields (\"Drug name: Tylenol\") suggesting a medical or product description context.\n\nThe phrase \"A patient with the term 'fever'\" implies an incomplete search query or symptom description, likely a medical condition or drug interaction entry, with \"fever\" and \"cough\" suggesting a list of symptoms or side effects.\n\nFinal token \"",
-    "broadcast_cosine_vs_baseline": 0.6563810706138611,
-    "broadcast_detects_concept": true,
+    "broadcast_description": "<explanation>Wikipedia article format with structured metadata fields (\"Drug name: Tylenol\") suggesting a medical or product description context.\n\nThe phrase \"A patient with the term 'fever'\" implies an incomplete search query or symptom description, likely a medical condition or drug interaction entry, with \"fever\" and \"cough\" suggesting symptoms or severity context.\n\nFinal token \"fever\"",
+    "broadcast_cosine_vs_baseline": 0.659975528717041,
+    "broadcast_detects_concept": false,
     "broadcast_next_tokens": [
       [
         ",",
-        0.8991732001304626
+        0.8992534279823303
       ],
       [
         " and",
-        0.09477215260267258
+        0.09478060901165009
       ],
       [
         " of",
-        0.0022288276813924313
+        0.0022290265187621117
       ],
       [
         " (",
-        0.0013518522027879953
+        0.001351972809061408
       ],
       [
         " up",
-        0.001052823499776423
+        0.0009291964233852923
       ],
       [
         " with",
-        0.00038731214590370655
+        0.0004389213281683624
       ],
       [
         ".",
-        0.00030163899646140635
+        0.0002349376300117001
       ],
       [
         " above",
-        0.00016145572590176016
+        0.00020733174460474402
       ],
       [
         " over",
-        0.00014248417573980987
+        0.00016147011774592102
       ],
       [
         " at",
-        5.241699909674935e-05
+        4.082604209543206e-05
       ]
     ],
     "last_token_description": "<explanation>Wikipedia article format with structured metadata fields (\"Drug name: Tylenol\") suggesting a medical or product description context.\n\nThe phrase \"A patient with symptoms of fever\" implies a search query or symptom description, likely a medical term or condition label, with \"fever\" and \"cough\" suggesting a compound noun or symptom list about the drug's side effects or illness.\n\n",
     "last_token_cosine_vs_baseline": 0.6601596474647522,
-    "last_token_detects_concept": true,
+    "last_token_detects_concept": false,
     "last_token_next_tokens": [
       [
         ",",
