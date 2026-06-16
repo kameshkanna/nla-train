@@ -544,10 +544,13 @@ def run_steering_eval(
 
                 all_results.append(record)
 
-    # Version tag encodes k_scale + layers so runs never overwrite each other
+    # Version tag encodes effective k values + layers so sweep runs never overwrite
     layer_tag = "-".join(str(l) for l in layers)
-    k_tag = f"k{k_scale:.2f}".rstrip("0").rstrip(".")
-    run_tag = f"{k_tag}_L{layer_tag}"
+    def _fmt_k(v: float) -> str:
+        return f"{v:.1f}".rstrip("0").rstrip(".")
+    sk_tag = f"sk{_fmt_k(safety_k)}" if safety_k is not None else f"ks{_fmt_k(k_scale)}"
+    fk_tag = f"fk{_fmt_k(french_k)}" if french_k is not None else f"ks{_fmt_k(k_scale)}"
+    run_tag = f"{sk_tag}_{fk_tag}_L{layer_tag}"
 
     result_path = out_dir / f"steering_eval_{run_tag}.json"
     with open(result_path, "w") as f:
