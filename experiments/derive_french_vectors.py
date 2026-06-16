@@ -122,9 +122,69 @@ def _make_chat(system: str, user: str, tokenizer) -> str:
 SYSTEM_FRENCH = "You must respond exclusively in French, regardless of the language the user writes in."
 SYSTEM_DEFAULT = "You are a helpful assistant. Respond in the same language the user writes in."
 
-# Built lazily in derive_french_vectors() after tokenizer is loaded
+# French translations of the same 50 questions.
+# Used as questions in the *positive* (French-mode) pairs so the first generated
+# token is unambiguously a French word — anchoring the CAA direction in French
+# rather than the generic "non-English multilingual" subspace.
+_USER_QUESTIONS_FR = [
+    "Combien font deux plus deux ?",
+    "Comment allez-vous aujourd'hui ?",
+    "Quelle est la plus haute montagne du monde ?",
+    "Expliquez comment fonctionne un ordinateur.",
+    "Qu'est-ce qui provoque les tremblements de terre ?",
+    "Comment fonctionnent les vaccins ?",
+    "Qu'est-ce que la photosynthèse ?",
+    "Décrivez comment fonctionne internet.",
+    "Quel est le point d'ébullition de l'eau ?",
+    "Pourquoi les feuilles changent-elles de couleur en automne ?",
+    "Comment les avions restent-ils en l'air ?",
+    "Quelle est la vitesse de la lumière ?",
+    "Expliquez ce qu'est la gravité.",
+    "Qu'est-ce qu'un trou noir ?",
+    "Comment les humains digèrent-ils la nourriture ?",
+    "Qu'est-ce que le changement climatique ?",
+    "Comment fonctionne la mémoire dans le cerveau ?",
+    "Qu'est-ce qu'un nombre premier ?",
+    "Expliquez le cycle de l'eau.",
+    "Qu'est-ce qui provoque le tonnerre et les éclairs ?",
+    "Comment les poissons respirent-ils sous l'eau ?",
+    "Qu'est-ce que l'ADN ?",
+    "Comment les abeilles fabriquent-elles le miel ?",
+    "Quelle est la théorie de l'évolution ?",
+    "Comment fonctionne une batterie ?",
+    "Qu'est-ce que l'apprentissage automatique ?",
+    "Expliquez l'offre et la demande.",
+    "Quelle est la différence entre un virus et une bactérie ?",
+    "Comment les panneaux solaires produisent-ils de l'électricité ?",
+    "Qu'est-ce que la bourse ?",
+    "Comment fonctionnent les télescopes ?",
+    "Qu'est-ce qu'un algorithme ?",
+    "Comment la lune influence-t-elle les marées ?",
+    "Qu'est-ce que la mécanique quantique ?",
+    "Comment fabrique-t-on le verre ?",
+    "Expliquez ce que signifie l'inflation.",
+    "Qu'est-ce que la mitochondrie ?",
+    "Comment les oiseaux naviguent-ils lors de la migration ?",
+    "Qu'est-ce que la couche d'ozone ?",
+    "Comment fonctionne un moteur à combustion ?",
+    "Quel est le sens de l'entropie ?",
+    "Expliquez le théorème de Pythagore.",
+    "Comment fonctionne le Wi-Fi ?",
+    "Qu'est-ce qu'un réseau de neurones ?",
+    "Comment l'acier est-il produit ?",
+    "Qu'est-ce qui cause les courants océaniques ?",
+    "Comment les plantes se reproduisent-elles ?",
+    "Qu'est-ce que la radioactivité ?",
+    "Expliquez comment une puce électronique est fabriquée.",
+    "Quelle est la différence entre le temps et le climat ?",
+]
+
+# Pairs: positive=French question (response will be French), negative=English question
+# (response will be English). Same semantic content, different language → CAA direction
+# captures the French language mode specifically, not generic non-English mode.
 FRENCH_PAIRS: list[dict] = [
-    {"question": q} for q in _USER_QUESTIONS
+    {"question_fr": qfr, "question_en": qen}
+    for qfr, qen in zip(_USER_QUESTIONS_FR, _USER_QUESTIONS)
 ]
 
 
@@ -229,8 +289,12 @@ def derive_french_vectors(
     """
     Derive French CAA steering vectors for Qwen2.5-7B-Instruct.
 
-    Positive: system="respond in French" + question
-    Negative: system="respond in user's language" + same question
+    Positive: French question + system="respond in French"
+        → first generated token is a French word
+    Negative: English question (same content) + default system prompt
+        → first generated token is an English word
+    Activation extracted at first-completion-token position so the diff
+    captures the French language mode, not generic non-English mode.
     Direction = mean(h_positive) - mean(h_negative), unit-normalised per layer.
 
     Args:
@@ -253,9 +317,14 @@ def derive_french_vectors(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    # Build chat-formatted prompts — same question, only system instruction differs
-    french_texts = [_make_chat(SYSTEM_FRENCH, p["question"], tokenizer) for p in FRENCH_PAIRS]
-    english_texts = [_make_chat(SYSTEM_DEFAULT, p["question"], tokenizer) for p in FRENCH_PAIRS]
+    # Positive: French question + "respond in French" system prompt
+    #   → first generated token is a French word ("Quatre", "Bien", "La", ...)
+    # Negative: English question + default system prompt
+    #   → first generated token is an English word ("Four", "I", "The", ...)
+    # Both sides have the same semantic content; only surface language differs.
+    # This anchors the CAA direction specifically in French, not generic non-English.
+    french_texts = [_make_chat(SYSTEM_FRENCH, p["question_fr"], tokenizer) for p in FRENCH_PAIRS]
+    english_texts = [_make_chat(SYSTEM_DEFAULT, p["question_en"], tokenizer) for p in FRENCH_PAIRS]
     logger.info("Example positive:\n%s", french_texts[0][:300])
     logger.info("Example negative:\n%s", english_texts[0][:300])
 

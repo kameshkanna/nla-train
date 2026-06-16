@@ -169,14 +169,23 @@ def _build_layer_configs(
     probe_layers: list[int],
     k_scale: float,
     inject_mode: str,
+    absolute_k: float | None = None,
 ) -> dict[int, tuple[np.ndarray, float, str]]:
-    """Build layer_configs dict for ActivationSteerer, restricted to probe_layers."""
+    """Build layer_configs dict for ActivationSteerer, restricted to probe_layers.
+
+    Args:
+        absolute_k: If set, overrides k_values entirely — uses this single K for
+            all layers regardless of the norm profile. Useful when norm-profile
+            calibrated K is too small to produce a measurable activation shift
+            (e.g. safety vectors at k~5 barely move residual stream norms of ~80).
+    """
     idx_map = {int(l): i for i, l in enumerate(layer_indices)}
     configs = {}
     for l in probe_layers:
         if l in idx_map:
             i = idx_map[l]
-            configs[l] = (mean_dirs[i], float(k_values[i]) * k_scale, inject_mode)
+            effective_k = absolute_k if absolute_k is not None else float(k_values[i]) * k_scale
+            configs[l] = (mean_dirs[i], effective_k, inject_mode)
     return configs
 
 
@@ -346,6 +355,8 @@ def run_steering_eval(
     nla_meta_path: str,
     output_dir: str,
     k_scale: float = 1.0,
+    safety_k: float | None = None,
+    french_k: float | None = None,
     max_new_tokens: int = 80,
     probe_layers: list[int] | None = None,
     base_batch_size: int = 8,
@@ -368,6 +379,10 @@ def run_steering_eval(
         nla_meta_path: Path to nla_meta_av.yaml.
         output_dir: Where to write results and figures.
         k_scale: Multiplier on the calibrated K values (1.0 = formula-derived).
+        safety_k: Absolute K override for safety vectors (ignores norm profile + k_scale).
+            Safety vectors with norm-profile K~5 barely shift residual stream norms of ~80;
+            use ~20–40 for a visible effect. Default None uses k_scale × profile K.
+        french_k: Absolute K override for French vectors. Default None uses k_scale × profile K.
         max_new_tokens: Max tokens per AV description.
         probe_layers: Layers to evaluate. Defaults to PROBE_LAYERS (18-22).
     """
@@ -459,10 +474,13 @@ def run_steering_eval(
 
     steered_data: dict[tuple[str, str], tuple[dict[int, np.ndarray], list]] = {}
 
+    behavior_absolute_k = {"safety": safety_k, "french": french_k}
+
     for inject_mode, behavior in tqdm(conditions, desc="steered passes"):
         mean_dirs, k_vals, layer_idxs = behavior_vectors[behavior]
         layer_configs = _build_layer_configs(
-            mean_dirs, k_vals, layer_idxs, layers, k_scale, inject_mode
+            mean_dirs, k_vals, layer_idxs, layers, k_scale, inject_mode,
+            absolute_k=behavior_absolute_k[behavior],
         )
         # Only forward-pass texts relevant to this behavior
         relevant_idx = [i for i, c in enumerate(categories_all)
@@ -500,13 +518,14 @@ def run_steering_eval(
                 b_desc = baseline_descs[layer][text_idx]
                 b_next = baseline_next[text_idx]
 
+                eff_k = behavior_absolute_k[behavior] if behavior_absolute_k[behavior] is not None else k_scale
                 record: dict[str, Any] = {
                     "text_idx": text_idx,
                     "category": category,
                     "text": text[:120],
                     "layer": layer,
                     "behavior": behavior,
-                    "k_scale": k_scale,
+                    "k_effective": eff_k,
                     "baseline_description": b_desc,
                     "baseline_detects_concept": _detect_concept(b_desc, behavior),
                     "baseline_next_tokens": b_next,
@@ -779,6 +798,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", default="experiments/results")
     p.add_argument("--k-scale", type=float, default=1.0,
                    help="Multiplier on calibrated K values (0.5=conservative, 2.0=strong)")
+    p.add_argument("--safety-k", type=float, default=None,
+                   help="Absolute K for safety vectors, overrides k-scale × profile K. "
+                        "Safety vectors at profile K~5 barely move residual norms ~80; "
+                        "try 20–40 for a visible shift.")
+    p.add_argument("--french-k", type=float, default=None,
+                   help="Absolute K for French vectors, overrides k-scale × profile K.")
     p.add_argument("--probe-layers", type=int, nargs="+", default=None,
                    help="Layers to probe (default: 18 19 20 21 22). "
                         "Pass a single layer e.g. --probe-layers 20 for fast debug.")
@@ -801,6 +826,8 @@ def main() -> None:
         nla_meta_path=args.nla_meta,
         output_dir=args.output_dir,
         k_scale=args.k_scale,
+        safety_k=args.safety_k,
+        french_k=args.french_k,
         max_new_tokens=args.max_new_tokens,
         probe_layers=args.probe_layers,
         base_batch_size=args.base_batch_size,
