@@ -544,13 +544,23 @@ def run_steering_eval(
 
                 all_results.append(record)
 
-    # Version tag encodes effective k values + layers so sweep runs never overwrite
+    # Version tag encodes effective k values + layers so sweep runs never overwrite.
+    # If per-behavior absolute K overrides are used, encode them explicitly.
+    # If both use k_scale (actbak method), encode just the scale once.
     layer_tag = "-".join(str(l) for l in layers)
     def _fmt_k(v: float) -> str:
-        return f"{v:.1f}".rstrip("0").rstrip(".")
-    sk_tag = f"sk{_fmt_k(safety_k)}" if safety_k is not None else f"ks{_fmt_k(k_scale)}"
-    fk_tag = f"fk{_fmt_k(french_k)}" if french_k is not None else f"ks{_fmt_k(k_scale)}"
-    run_tag = f"{sk_tag}_{fk_tag}_L{layer_tag}"
+        s = f"{v:.2f}".rstrip("0").rstrip(".")
+        return s
+
+    if safety_k is None and french_k is None:
+        # Pure k_scale mode — matches actbak convention
+        run_tag = f"ks{_fmt_k(k_scale)}_L{layer_tag}"
+    elif safety_k is not None and french_k is not None:
+        run_tag = f"sk{_fmt_k(safety_k)}_fk{_fmt_k(french_k)}_L{layer_tag}"
+    else:
+        sk = _fmt_k(safety_k) if safety_k is not None else f"ks{_fmt_k(k_scale)}"
+        fk = _fmt_k(french_k) if french_k is not None else f"ks{_fmt_k(k_scale)}"
+        run_tag = f"sk{sk}_fk{fk}_L{layer_tag}"
 
     result_path = out_dir / f"steering_eval_{run_tag}.json"
     with open(result_path, "w") as f:
