@@ -36,8 +36,8 @@ CONFIG="configs/qwen7b_layer20.yaml"
 AV_CKPT="checkpoints/grpo/final_av"
 NLA_META="data/labeled/nla_meta_av.yaml"
 OUT_DIR="experiments/results"
-BATCH=1024
-AV_BATCH=1024
+BATCH=2048
+AV_BATCH=2048
 SINGLE_LAYER=0
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
